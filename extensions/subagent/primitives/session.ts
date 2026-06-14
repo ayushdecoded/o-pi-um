@@ -29,6 +29,7 @@ export function ensureSessionRoot(): void {
 }
 
 export function runPaths(id: string): RunPaths {
+  // Per-run files are intentionally stable so failures can be inspected after the parent returns.
   const runDir = path.join(SESSION_ROOT, "runs", id);
   fs.mkdirSync(runDir, { recursive: true });
   return {

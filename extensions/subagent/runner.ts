@@ -17,6 +17,7 @@ export async function runParallelSubagents(params: { tasks: Array<{ task: string
 }
 
 export async function runPiSubagent(params: { task: string; model?: string; reasoning?: ThinkingLevelType }, ctx: ExtensionContext, signal?: AbortSignal): Promise<RunDetails> {
+  // New subagents get isolated Pi session files and can be followed up by path.
   const depth = currentDepth();
   if (depth >= MAX_DEPTH) return blockedRun(params.task, params.model);
   const startedAt = Date.now();
@@ -29,6 +30,7 @@ export async function runPiSubagent(params: { task: string; model?: string; reas
 }
 
 export async function messageSubagentSession(params: FollowupParamsType, ctx: ExtensionContext, signal?: AbortSignal): Promise<RunDetails> {
+  // Follow-ups reuse exactly the provided child session file; no transcript is copied into the parent.
   const route = resolveModelRoute(ctx, params.model, params.reasoning);
   const model = route.model;
   const reasoning = route.reasoning;
@@ -42,6 +44,7 @@ export async function messageSubagentSession(params: FollowupParamsType, ctx: Ex
 }
 
 async function withTrackedRun(input: { id: string; task: string; model?: string; startedAt: number }, ctx: ExtensionContext, fn: () => Promise<RunDetails>): Promise<RunDetails> {
+  // Scheduling/UI concerns stay outside the Pi runner primitive.
   await acquireSlot();
   activeRuns.set(input.id, { ...input, status: "running" });
   startPanel(ctx);

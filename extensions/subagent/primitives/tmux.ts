@@ -15,6 +15,7 @@ export async function startTmuxScript(sessionName: string, scriptFile: string): 
 }
 
 export async function waitForStatus(statusFile: string, tmuxSession: string, signal?: AbortSignal): Promise<number> {
+  // The shell script writes this sentinel after Pi exits; until then tmux owns the child.
   while (!fs.existsSync(statusFile)) {
     if (signal?.aborted) {
       await runCommand("tmux", ["kill-session", "-t", tmuxSession]);
