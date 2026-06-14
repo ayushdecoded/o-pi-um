@@ -7,6 +7,7 @@
 ```text
 /models
 /models setup
+/models bootstrap
 ```
 
 ## Sections

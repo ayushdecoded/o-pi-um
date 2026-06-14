@@ -60,6 +60,7 @@ export async function runPiSubagent(
         startedAt,
         cwd: ctx.cwd,
         depth,
+        timeoutMs: subagentTimeoutMs(),
         freshSessionDir: true,
         signal,
       });
@@ -97,6 +98,7 @@ export async function messageSubagentSession(
       startedAt,
       cwd: ctx.cwd,
       depth: currentDepth(),
+      timeoutMs: subagentTimeoutMs(),
       freshSessionDir: false,
       signal,
     });
@@ -123,6 +125,11 @@ async function withTrackedRun(
 
 function currentDepth(): number {
   return Number(process.env.PI_SUBAGENT_DEPTH ?? "0");
+}
+
+function subagentTimeoutMs(): number {
+  const parsed = Number.parseInt(process.env.PI_SUBAGENT_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300_000;
 }
 
 function blockedRun(task: string, model?: string): RunDetails {

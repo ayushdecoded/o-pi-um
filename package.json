@@ -7,6 +7,7 @@
     "pi-package"
   ],
   "scripts": {
+    "check": "npm run typecheck && npm run format:check",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
+import { goalTokenUsageFromUsage, isRecord, usageCostFromUsage } from "../../shared/usage.ts";
 import type { GoalState } from "../domain/types.ts";
 import { truncate } from "../ui/format.ts";
 
@@ -44,28 +45,7 @@ export function assistantTokenUsage(messages: AgentMessage[]): number {
 
 // Normalize usage shapes across providers. Cache reads are subtracted so goal budget tracks
 // effective new context/output rather than repeatedly charging cached prompt tokens.
-export function tokenUsageFromUsage(usage: Record<string, unknown>): number {
-  const input = firstNumberField(usage, ["input", "input_tokens", "prompt_tokens", "promptTokens"]);
-  const output = firstNumberField(usage, [
-    "output",
-    "output_tokens",
-    "completion_tokens",
-    "completionTokens",
-  ]);
-  const cacheRead =
-    firstNumberField(usage, [
-      "cacheRead",
-      "cache_read",
-      "cached_input_tokens",
-      "cachedInputTokens",
-    ]) ||
-    nestedNumberField(usage, ["prompt_tokens_details", "cached_tokens"]) ||
-    nestedNumberField(usage, ["input_token_details", "cache_read"]) ||
-    nestedNumberField(usage, ["input_tokens_details", "cached_tokens"]);
-  if (input > 0 || output > 0 || cacheRead > 0)
-    return Math.max(0, input - cacheRead) + Math.max(0, output);
-  return firstNumberField(usage, ["total", "total_tokens", "totalTokens"]);
-}
+export const tokenUsageFromUsage = goalTokenUsageFromUsage;
 
 export function assistantCostUsage(messages: AgentMessage[]): number {
   let total = 0;
@@ -73,13 +53,7 @@ export function assistantCostUsage(messages: AgentMessage[]): number {
     const role = (message as { role?: string }).role;
     if (role !== "assistant" && role !== "model") continue;
     const usage = (message as { usage?: Record<string, unknown> }).usage;
-    const cost =
-      usage && isRecord(usage.cost)
-        ? numberField(usage.cost, "total")
-        : usage
-          ? numberField(usage, "cost")
-          : 0;
-    total += Math.max(0, cost);
+    total += usage ? usageCostFromUsage(usage) : 0;
   }
   return total;
 }
@@ -92,32 +66,6 @@ export function goalBudgetExceeded(goal: GoalState): boolean {
     (goal.turnBudget != null && (goal.turnsUsed ?? 0) >= goal.turnBudget) ||
     (goal.costBudgetUsd != null && (goal.costUsedUsd ?? 0) >= goal.costBudgetUsd)
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function numberField(obj: Record<string, unknown>, key: string): number {
-  const value = obj[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function firstNumberField(obj: Record<string, unknown>, keys: string[]): number {
-  for (const key of keys) {
-    const value = numberField(obj, key);
-    if (value > 0) return value;
-  }
-  return 0;
-}
-
-function nestedNumberField(obj: Record<string, unknown>, path: string[]): number {
-  let current: unknown = obj;
-  for (const key of path) {
-    if (!isRecord(current)) return 0;
-    current = current[key];
-  }
-  return typeof current === "number" && Number.isFinite(current) ? current : 0;
 }
 
 export function looksAborted(messages: AgentMessage[]): boolean {

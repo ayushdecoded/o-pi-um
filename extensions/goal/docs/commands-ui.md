@@ -32,4 +32,4 @@ The dashboard shows:
 
 ## Model routes
 
-Use `/models` and `/models setup` from the subagent/system extension for `.pi/MODELS.md`.
+Use `/models` and `/models setup` from the subagent extension for `.pi/MODELS.md`.

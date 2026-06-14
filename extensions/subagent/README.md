@@ -20,9 +20,11 @@ subagent({
 - `sessionFile` plus `task` sends a follow-up to an existing child session.
 - Child sessions live under `~/.pi/agent/subagent-sessions`.
 - Run logs live under `~/.pi/agent/subagent-sessions/runs/<run-id>`.
+- Requires `tmux`.
 - Max active children: 10.
 - Max nesting depth: 2.
 - Results include status, output, session file, input/output token usage, and cost when available.
+- Parent wait timeout defaults to 300s; override with `PI_SUBAGENT_TIMEOUT_MS`.
 
 ## Model routes
 

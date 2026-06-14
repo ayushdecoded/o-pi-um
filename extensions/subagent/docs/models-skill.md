@@ -8,7 +8,7 @@ allowed-tools:
   - "Write"
 ---
 
-# Goal Setup Skill
+# Model Routing Setup
 
 Draft `.pi/MODELS.md` for the current project. Keep it minimal and valid.
 
@@ -17,7 +17,7 @@ Draft `.pi/MODELS.md` for the current project. Keep it minimal and valid.
 - Inspect available authenticated models and the project shape before proposing choices.
 - Prefer already-authenticated models unless there is a clear reason to suggest another.
 - Use one `model:` and one `thinking:` line per section.
-- Do not add secondary/fallback fields.
+- Optional fallback fields are allowed when useful: `secondary_model:` and `secondary_thinking:`.
 - Show the draft and get user confirmation before writing.
 - If an existing file is present, do not overwrite without confirmation.
 

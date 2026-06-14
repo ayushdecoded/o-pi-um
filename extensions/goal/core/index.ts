@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { subagentToolResultUsage } from "../../shared/usage.ts";
 import { compactGoalStateForAgent } from "../ui/text.ts";
 import { goalHelpText, pickWithSearch, showSubagentDetails } from "../ui/overlays.ts";
 import { showGoalStatus } from "../ui/status.ts";
@@ -184,7 +185,7 @@ export default function goalExpansion(pi: ExtensionAPI) {
   pi.on("tool_execution_end", async (event) => {
     runtime.currentTurnToolCalls += 1;
     if (event.toolName !== "subagent") return;
-    const usage = subagentUsageFromToolResult(event.result);
+    const usage = subagentToolResultUsage(event.result);
     runtime.currentSubagentTokens += usage.tokens;
     runtime.currentSubagentCostUsd += usage.costUsd;
   });
@@ -295,26 +296,4 @@ export default function goalExpansion(pi: ExtensionAPI) {
     clearCompletionBannerTimer();
     updateGoalUi(ctx, null);
   });
-}
-
-function subagentUsageFromToolResult(result: unknown): { tokens: number; costUsd: number } {
-  const details = isRecord(result) ? result.details : undefined;
-  const runs = isRecord(details) && Array.isArray(details.runs) ? details.runs : [];
-  let tokens = 0;
-  let costUsd = 0;
-  for (const run of runs) {
-    if (!isRecord(run) || !isRecord(run.usage)) continue;
-    tokens += numberField(run.usage, "tokens");
-    costUsd += numberField(run.usage, "costUsd");
-  }
-  return { tokens, costUsd };
-}
-
-function numberField(record: Record<string, unknown>, key: string): number {
-  const value = record[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
 }

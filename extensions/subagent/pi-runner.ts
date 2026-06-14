@@ -19,6 +19,7 @@ export type PiRunInput = {
   startedAt: number;
   cwd: string;
   depth: number;
+  timeoutMs: number;
   freshSessionDir: boolean;
   signal?: AbortSignal;
 };
@@ -49,7 +50,12 @@ export async function runPiInTmux(input: PiRunInput): Promise<RunDetails> {
   const tmuxSession = tmuxName(input.id);
   const startError = await startTmuxScript(tmuxSession, paths.scriptFile);
   if (startError) return failedRun(input, startError);
-  const exitCode = await waitForStatus(paths.statusFile, tmuxSession, input.signal);
+  const { exitCode, timedOut } = await waitForStatus(
+    paths.statusFile,
+    tmuxSession,
+    input.signal,
+    input.timeoutMs,
+  );
   const messages = readJsonMessages(paths.stdoutFile);
   const output = messages.length ? finalTextFromMessage(messages[messages.length - 1]!) : "";
   const usage = usageFromMessages(messages);
@@ -63,7 +69,9 @@ export async function runPiInTmux(input: PiRunInput): Promise<RunDetails> {
     output,
     sessionFile: input.sessionFile,
     usage,
-    ...(exitCode === 0 ? {} : { error: stderr || `pi exited with code ${exitCode}` }),
+    ...(exitCode === 0
+      ? {}
+      : { error: runError(exitCode, stderr, timedOut, input.timeoutMs, tmuxSession) }),
     startedAt: input.startedAt,
     completedAt: Date.now(),
   };
@@ -104,6 +112,19 @@ function jsonEventFilterScript(): string {
   return `const readline=require('node:readline');
 const rl=readline.createInterface({input:process.stdin});
 rl.on('line',(line)=>{try{const event=JSON.parse(line);if(event.type==='message_end'||event.type==='session')process.stdout.write(line+'\\n');}catch{}});`;
+}
+
+function runError(
+  exitCode: number,
+  stderr: string,
+  timedOut: boolean,
+  timeoutMs: number,
+  tmuxSession: string,
+): string {
+  if (!timedOut) return stderr || `pi exited with code ${exitCode}`;
+  const timeout = Math.ceil(timeoutMs / 1000);
+  const message = `Subagent timed out after ${timeout}s. Inspect with: tmux attach -t ${tmuxSession}`;
+  return stderr ? `${message}\n${stderr}` : message;
 }
 
 function failedRun(input: PiRunInput, error: string): RunDetails {

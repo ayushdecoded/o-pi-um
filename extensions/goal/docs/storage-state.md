@@ -22,5 +22,5 @@ Process-local runtime tracks active timers, queued continuations, current turn u
 
 - Goal state owns goal lifecycle only.
 - Subagent sessions are separate Pi session files.
-- `.pi/MODELS.md` is owned by the subagent/system extension.
+- `.pi/MODELS.md` is owned by the subagent extension.
 - UI overlay data is process-local and not persisted in goal state.
