@@ -29,3 +29,9 @@ subagent({
 - `/models` validates `.pi/MODELS.md`.
 - `/models setup` drafts `.pi/MODELS.md`.
 - `model` may be an exact `provider/id` or a `.pi/MODELS.md` section name.
+
+## Code layout
+
+- `runner.ts` orchestrates runs.
+- `pi-runner.ts` executes one child Pi run.
+- `primitives/` contains tmux, path, process, and JSON-stream helpers.
