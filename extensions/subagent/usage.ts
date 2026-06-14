@@ -16,11 +16,23 @@ export function usageFromMessages(messages: Message[]): RunUsage {
   return { inputTokens, outputTokens, tokens: inputTokens + outputTokens, costUsd };
 }
 
-function tokenSplitFromUsage(usage: Record<string, unknown>): { inputTokens: number; outputTokens: number } {
+function tokenSplitFromUsage(usage: Record<string, unknown>): {
+  inputTokens: number;
+  outputTokens: number;
+} {
   const input = firstNumberField(usage, ["input", "input_tokens", "prompt_tokens", "promptTokens"]);
-  const output = firstNumberField(usage, ["output", "output_tokens", "completion_tokens", "completionTokens"]);
-  if (input > 0 || output > 0) return { inputTokens: Math.max(0, input), outputTokens: Math.max(0, output) };
-  return { inputTokens: firstNumberField(usage, ["total", "total_tokens", "totalTokens"]), outputTokens: 0 };
+  const output = firstNumberField(usage, [
+    "output",
+    "output_tokens",
+    "completion_tokens",
+    "completionTokens",
+  ]);
+  if (input > 0 || output > 0)
+    return { inputTokens: Math.max(0, input), outputTokens: Math.max(0, output) };
+  return {
+    inputTokens: firstNumberField(usage, ["total", "total_tokens", "totalTokens"]),
+    outputTokens: 0,
+  };
 }
 
 function costFromUsage(usage: Record<string, unknown>): number {

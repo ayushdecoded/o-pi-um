@@ -4,40 +4,53 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { GOAL_STATUS_KEY, HEADLESS_AUTO_APPROVE_ENV } from "../domain/constants.ts";
 import { validateObjective } from "../domain/intent.ts";
-import { activeObjective, activeObjectiveIndex, advanceObjectiveCursor, isApprovedActiveGoal, isApprovedGoal, normalizedObjectives, nowSeconds, touchGoal } from "../domain/state.ts";
+import {
+  activeObjective,
+  activeObjectiveIndex,
+  advanceObjectiveCursor,
+  isApprovedActiveGoal,
+  isApprovedGoal,
+  normalizedObjectives,
+  nowSeconds,
+  touchGoal,
+} from "../domain/state.ts";
 import type { GoalState } from "../domain/types.ts";
 import { goalRef, readGoal, writeGoal } from "../runtime/store.ts";
 import { approveGoalContract, goalContractPreviewLines } from "../ui/approval.ts";
 import { scheduleCompletionBannerClear, updateGoalUi } from "../ui/dashboard.ts";
-import { checklistSummaryText, completionBudgetReport, formatGoalForTool, formatSubtaskUpdate } from "../ui/text.ts";
-import { accountLiveElapsed, canAutoContinue, headlessAutoApproveEnabled, queueContinuation, runtime, toolResponse } from "./runtime.ts";
+import {
+  checklistSummaryText,
+  completionBudgetReport,
+  formatGoalForTool,
+  formatSubtaskUpdate,
+} from "../ui/text.ts";
+import {
+  accountLiveElapsed,
+  canAutoContinue,
+  headlessAutoApproveEnabled,
+  queueContinuation,
+  runtime,
+  toolResponse,
+} from "./runtime.ts";
 
 // Model tool actions. Each handler mutates durable state once, updates UI, then returns a text result.
 export function createGoalActions(pi: ExtensionAPI) {
   // Setup approval boundary: converts clarified contract into the first approved objective.
-  async function presentGoalContract(
-    ctx: ExtensionContext,
-    objectiveRaw: string,
-  ) {
+  async function presentGoalContract(ctx: ExtensionContext, objectiveRaw: string) {
     const objective = objectiveRaw.trim();
     const validation = validateObjective(objective);
     if (validation) return toolResponse(validation, true);
     const ref = goalRef(ctx);
     const goal = await readGoal(ref);
     if (!goal || isApprovedGoal(goal))
-      return toolResponse(
-        "No goal setup is active. Start with /goal <intent>.",
-        true,
-      );
+      return toolResponse("No goal setup is active. Start with /goal <intent>.", true);
 
     let approved = headlessAutoApproveEnabled();
     // Interactive sessions require explicit contract approval before any goal work starts.
     if (ctx.hasUI) {
-      ctx.ui.setWidget(
-        GOAL_STATUS_KEY,
-        goalContractPreviewLines(ctx, goal, objective),
-        { placement: "aboveEditor" },
-      );
+      ctx.ui.setWidget(GOAL_STATUS_KEY, goalContractPreviewLines(ctx, goal, objective), {
+        placement: "aboveEditor",
+      });
       approved = await approveGoalContract(ctx, goal, objective);
     } else if (!approved) {
       return toolResponse(
@@ -47,10 +60,7 @@ export function createGoalActions(pi: ExtensionAPI) {
     }
     if (!approved) {
       updateGoalUi(ctx, goal);
-      return toolResponse(
-        "Goal contract was not approved. Continue setup with the user.",
-        true,
-      );
+      return toolResponse("Goal contract was not approved. Continue setup with the user.", true);
     }
 
     // Approved objectives are the source of truth; objectives.length === 0 means setup pending.
@@ -82,10 +92,7 @@ export function createGoalActions(pi: ExtensionAPI) {
       }))
       .filter((item) => item.title.length > 0);
     if (updates.length === 0)
-      return toolResponse(
-        "At least one subtask title must be non-empty.",
-        true,
-      );
+      return toolResponse("At least one subtask title must be non-empty.", true);
     const ref = goalRef(ctx);
     const goal = await readGoal(ref);
     if (!goal || !isApprovedGoal(goal) || goal.status !== "active")
@@ -152,9 +159,7 @@ export function createGoalActions(pi: ExtensionAPI) {
       goal.subtasks = (goal.subtasks ?? [])
         .filter((item) => item.objectiveIndex !== drop)
         .map((item) =>
-          item.objectiveIndex > drop
-            ? { ...item, objectiveIndex: item.objectiveIndex - 1 }
-            : item,
+          item.objectiveIndex > drop ? { ...item, objectiveIndex: item.objectiveIndex - 1 } : item,
         );
       goal.currentObjectiveIndex = Math.min(
         goal.currentObjectiveIndex,
@@ -172,17 +177,11 @@ export function createGoalActions(pi: ExtensionAPI) {
     // Move to the first objective that still has open work, if any.
     advanceObjectiveCursor(goal);
     if (lines.length === 0)
-      return toolResponse(
-        "No changes: provide expansions.add/objective or expansions.drop.",
-        true,
-      );
+      return toolResponse("No changes: provide expansions.add/objective or expansions.drop.", true);
     touchGoal(goal);
     await writeGoal(ref, goal);
     updateGoalUi(ctx, goal);
-    return toolResponse(
-      `${lines.join("\n")}\n\nActive objective: ${activeObjective(goal)}`,
-      false,
-    );
+    return toolResponse(`${lines.join("\n")}\n\nActive objective: ${activeObjective(goal)}`, false);
   }
 
   // Completion is allowed only after all tracked subtasks are complete.
@@ -211,10 +210,7 @@ export function createGoalActions(pi: ExtensionAPI) {
     runtime.activeContinuationGoalId = null;
     runtime.pendingContinuationGoalId = null;
     runtime.budgetWrapUpPending = false;
-    return toolResponse(
-      `${formatGoalForTool(goal)}\n\n${completionBudgetReport(goal)}`,
-      false,
-    );
+    return toolResponse(`${formatGoalForTool(goal)}\n\n${completionBudgetReport(goal)}`, false);
   }
 
   // Pause stops the loop. User can continue via /goal resume or goal(action="continue") after blocker clears.
@@ -251,10 +247,7 @@ ${formatGoalForTool(goal)}`,
         true,
       );
     if (!canAutoContinue(ctx) || ctx.hasPendingMessages())
-      return toolResponse(
-        "Cannot continue at this moment — inspect /goal status.",
-        true,
-      );
+      return toolResponse("Cannot continue at this moment — inspect /goal status.", true);
     queueContinuation(pi, ctx, goal, "continue");
     return toolResponse(`Continue queued.\n${formatGoalForTool(goal)}`, false);
   }
@@ -267,5 +260,4 @@ ${formatGoalForTool(goal)}`,
     pauseGoalFromAgent,
     continueGoalFromAgent,
   };
-
 }

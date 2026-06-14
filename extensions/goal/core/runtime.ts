@@ -37,16 +37,12 @@ export function canAutoContinue(ctx: ExtensionContext): boolean {
   return ctx.hasUI;
 }
 
-export function keepGoalMessageForState(
-  message: AgentMessage,
-  goal: GoalState | null,
-): boolean {
+export function keepGoalMessageForState(message: AgentMessage, goal: GoalState | null): boolean {
   if (!isRecord(message)) return true;
   // Only messages tagged by queueSetup/queueContinuation are loop machinery.
   // Everything else is real conversation context and must pass through untouched.
   const type = message.type;
-  if (type !== GOAL_CONTINUATION_MESSAGE_TYPE && type !== GOAL_SETUP_MESSAGE_TYPE)
-    return true;
+  if (type !== GOAL_CONTINUATION_MESSAGE_TYPE && type !== GOAL_SETUP_MESSAGE_TYPE) return true;
   const goalId = typeof message.goalId === "string" ? message.goalId : undefined;
   if (!goal || goal.id !== goalId) return false;
   // Setup prompt is only valid before the contract has become objectives[0].
@@ -56,13 +52,10 @@ export function keepGoalMessageForState(
 }
 
 export function queueSetup(pi: ExtensionAPI, goal: GoalState): void {
-  pi.sendUserMessage(setupPrompt(goal.intent), {
-    deliverAs: "followUp",
-    metadata: {
-      type: GOAL_SETUP_MESSAGE_TYPE,
-      goalId: goal.id,
-      reason: "setup",
-    },
+  sendFollowUp(pi, setupPrompt(goal), {
+    type: GOAL_SETUP_MESSAGE_TYPE,
+    goalId: goal.id,
+    reason: "setup",
   });
 }
 
@@ -90,15 +83,23 @@ function continuationSafeSend(
   version: number,
   extraInstruction?: string,
 ): void {
-  pi.sendUserMessage(continuationPrompt(goal, reason, extraInstruction), {
-    deliverAs: "followUp",
-    metadata: {
-      type: GOAL_CONTINUATION_MESSAGE_TYPE,
-      goalId: goal.id,
-      reason,
-      version,
-    },
+  sendFollowUp(pi, continuationPrompt(goal, reason, extraInstruction), {
+    type: GOAL_CONTINUATION_MESSAGE_TYPE,
+    goalId: goal.id,
+    reason,
+    version,
   });
+}
+
+function sendFollowUp(pi: ExtensionAPI, text: string, metadata: Record<string, unknown>): void {
+  (
+    pi as ExtensionAPI & {
+      sendUserMessage(
+        message: string,
+        options: { deliverAs: "followUp"; metadata: Record<string, unknown> },
+      ): void;
+    }
+  ).sendUserMessage(text, { deliverAs: "followUp", metadata });
 }
 
 export function clearRuntimeFlags(): void {

@@ -3,7 +3,7 @@
 ## Setup
 
 ```ts
-goal({ contract: string })
+goal({ contract: string });
 ```
 
 Only valid while no contract has been approved.

@@ -1,11 +1,12 @@
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Markdown } from "@earendil-works/pi-tui";
+import { Markdown, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 
 import { activeObjective, goalMetrics, isApprovedGoal } from "../domain/state.ts";
 import type { GoalModelOverride, GoalState } from "../domain/types.ts";
 import { formatElapsed, formatTokens } from "./format.ts";
-import { statusLabel } from "./text.ts";
+import { checklistSummaryText } from "./text.ts";
+import { exactGoalTokensSoFar, statusLabel } from "./statusline.ts";
 
 // Detailed status views for `/goal` and `/goal status`.
 export async function showGoalStatus(
@@ -14,10 +15,7 @@ export async function showGoalStatus(
   pendingModelOverride?: GoalModelOverride,
 ): Promise<void> {
   if (!ctx.hasUI) {
-    ctx.ui.notify(
-      goalPanelPlaintext(goal, pendingModelOverride),
-      goal ? "info" : "warning",
-    );
+    ctx.ui.notify(goalPanelPlaintext(goal, pendingModelOverride), goal ? "info" : "warning");
     return;
   }
   await ctx.ui.custom<void>(
@@ -59,19 +57,14 @@ export async function showGoalStatus(
           const title = `${theme.fg("accent", theme.bold("Goal Status"))}${info}`;
           const help = theme.fg(
             "dim",
-            maxScroll > 0
-              ? "↑↓ PgUp/PgDn scroll · any key closes"
-              : "any key closes",
+            maxScroll > 0 ? "↑↓ PgUp/PgDn scroll · any key closes" : "any key closes",
           );
           return [
             border(panelWidth),
             pad(`│  ${title}`, panelWidth - 1) + bg(theme.fg("accent", "│")),
             pad(`│  ${help}`, panelWidth - 1) + bg(theme.fg("accent", "│")),
             pad("│", panelWidth - 1) + bg(theme.fg("accent", "│")),
-            ...shown.map(
-              (line) =>
-                pad(`│  ${line}`, panelWidth - 1) + bg(theme.fg("accent", "│")),
-            ),
+            ...shown.map((line) => pad(`│  ${line}`, panelWidth - 1) + bg(theme.fg("accent", "│"))),
             pad("│", panelWidth - 1) + bg(theme.fg("accent", "│")),
             pad(`│  ${help}`, panelWidth - 1) + bg(theme.fg("accent", "│")),
             bottom(panelWidth),
@@ -84,8 +77,7 @@ export async function showGoalStatus(
           if (matchesKey(data, "down")) scroll += 1;
           else if (matchesKey(data, "up")) scroll = Math.max(0, scroll - 1);
           else if (matchesKey(data, "pageDown")) scroll += previewHeight;
-          else if (matchesKey(data, "pageUp"))
-            scroll = Math.max(0, scroll - previewHeight);
+          else if (matchesKey(data, "pageUp")) scroll = Math.max(0, scroll - previewHeight);
           else if (data) return done(undefined);
           tui.requestRender();
         },
@@ -118,15 +110,11 @@ export function goalPanelPlaintext(
     `Objective: ${activeObjective(goal)}`,
     `Time used: ${formatElapsed(goal.timeUsedSeconds)}`,
     `Tokens used: ${formatTokens(goal.tokensUsed)}`,
-    goal.tokenBudget !== null
-      ? `Token budget: ${formatTokens(goal.tokenBudget)}`
-      : undefined,
+    goal.tokenBudget !== null ? `Token budget: ${formatTokens(goal.tokenBudget)}` : undefined,
     goal.timeBudgetSeconds != null
       ? `Time budget: ${formatElapsed(goal.timeBudgetSeconds)}`
       : undefined,
-    goal.turnBudget != null
-      ? `Turn budget: ${goal.turnsUsed ?? 0}/${goal.turnBudget}`
-      : undefined,
+    goal.turnBudget != null ? `Turn budget: ${goal.turnsUsed ?? 0}/${goal.turnBudget}` : undefined,
     goal.costBudgetUsd != null
       ? `Cost budget: $${(goal.costUsedUsd ?? 0).toFixed(4)}/$${goal.costBudgetUsd.toFixed(4)}`
       : undefined,
@@ -136,15 +124,11 @@ export function goalPanelPlaintext(
     goal.blockedReason
       ? `Blocked: ${goal.blockedReason === "waiting_on_user" ? "waiting on user" : "no progress"}`
       : undefined,
-    goal.subtasks?.length
-      ? `Checklist: ${checklistSummaryText(goal)}`
-      : undefined,
+    goal.subtasks?.length ? `Checklist: ${checklistSummaryText(goal)}` : undefined,
     ...(goal.subtasks?.length
       ? [
           "Tracked checklist:",
-          ...goal.subtasks.map(
-            (item) => `- ${item.completed ? "[x]" : "[ ]"} ${item.title}`,
-          ),
+          ...goal.subtasks.map((item) => `- ${item.completed ? "[x]" : "[ ]"} ${item.title}`),
         ]
       : []),
     goal.modelOverride
@@ -173,9 +157,7 @@ export function goalStatusMarkdown(
   const budgetLines = [
     `- Time: ${formatElapsed(goal.timeUsedSeconds)}${goal.timeBudgetSeconds != null ? ` / ${formatElapsed(goal.timeBudgetSeconds)}` : ""}`,
     `- Tokens: ${formatTokens(exactGoalTokensSoFar(goal))}${goal.tokenBudget !== null ? ` / ${formatTokens(goal.tokenBudget)}` : ""}`,
-    goal.turnBudget != null
-      ? `- Turns: ${goal.turnsUsed ?? 0} / ${goal.turnBudget}`
-      : undefined,
+    goal.turnBudget != null ? `- Turns: ${goal.turnsUsed ?? 0} / ${goal.turnBudget}` : undefined,
     goal.costBudgetUsd != null
       ? `- Cost: $${(goal.costUsedUsd ?? 0).toFixed(4)} / $${goal.costBudgetUsd.toFixed(4)}`
       : undefined,
@@ -187,9 +169,7 @@ export function goalStatusMarkdown(
         `## Checklist`,
         checklistSummaryText(goal),
         "",
-        ...goal.subtasks.map(
-          (item) => `- ${item.completed ? "[x]" : "[ ]"} ${item.title}`,
-        ),
+        ...goal.subtasks.map((item) => `- ${item.completed ? "[x]" : "[ ]"} ${item.title}`),
       ].join("\n")
     : "## Checklist\nNo tracked subtasks yet.";
   return [
@@ -219,4 +199,3 @@ export function goalStatusMarkdown(
     .filter(Boolean)
     .join("\n");
 }
-

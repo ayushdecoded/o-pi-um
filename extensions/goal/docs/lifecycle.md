@@ -7,7 +7,7 @@ A goal is a guarded loop around one approved contract.
 `/goal <intent>` creates paused state with no objectives. The assistant discusses scope and calls:
 
 ```ts
-goal({ contract: "approved contract" })
+goal({ contract: "approved contract" });
 ```
 
 The contract becomes objective `0`, the goal becomes active, and continuation begins.
@@ -17,10 +17,10 @@ The contract becomes objective `0`, the goal becomes active, and continuation be
 Each continuation receives only the active objective, checklist, blockers, and budget pressure. The assistant updates progress with:
 
 ```ts
-goal({ action: "subtask", subtasks: [{ subtask: "...", completed: true }] })
-goal({ action: "expand", expansions: { add: ["..."] } })
-goal({ action: "pause" })
-goal({ action: "complete" })
+goal({ action: "subtask", subtasks: [{ subtask: "...", completed: true }] });
+goal({ action: "expand", expansions: { add: ["..."] } });
+goal({ action: "pause" });
+goal({ action: "complete" });
 ```
 
 ## Pause and resume

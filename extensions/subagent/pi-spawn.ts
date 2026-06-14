@@ -11,9 +11,7 @@ export function resolvePiPackageRoot(): string | undefined {
     let dir = path.dirname(fs.realpathSync(entry));
     while (dir !== path.dirname(dir)) {
       try {
-        const pkg = JSON.parse(
-          fs.readFileSync(path.join(dir, "package.json"), "utf-8"),
-        );
+        const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf-8"));
         if (pkg.name === "@earendil-works/pi-coding-agent") return dir;
       } catch {}
       dir = path.dirname(dir);
@@ -49,13 +47,10 @@ function normalizePath(filePath: string): string {
   return path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
 }
 
-export function resolveWindowsPiCliScript(
-  deps: PiSpawnDeps = {},
-): string | undefined {
+export function resolveWindowsPiCliScript(deps: PiSpawnDeps = {}): string | undefined {
   const existsSync = deps.existsSync ?? fs.existsSync;
   const readFileSync =
-    deps.readFileSync ??
-    ((filePath, encoding) => fs.readFileSync(filePath, encoding));
+    deps.readFileSync ?? ((filePath, encoding) => fs.readFileSync(filePath, encoding));
   const argv1 = deps.argv1 ?? process.argv[1];
 
   if (argv1) {
@@ -79,13 +74,9 @@ export function resolveWindowsPiCliScript(
     };
     const binField = packageJson.bin;
     const binPath =
-      typeof binField === "string"
-        ? binField
-        : (binField?.pi ?? Object.values(binField ?? {})[0]);
+      typeof binField === "string" ? binField : (binField?.pi ?? Object.values(binField ?? {})[0]);
     if (!binPath) return undefined;
-    const candidate = normalizePath(
-      path.resolve(path.dirname(packageJsonPath), binPath),
-    );
+    const candidate = normalizePath(path.resolve(path.dirname(packageJsonPath), binPath));
     if (isRunnableNodeScript(candidate, existsSync)) {
       return candidate;
     }
@@ -96,10 +87,7 @@ export function resolveWindowsPiCliScript(
   return undefined;
 }
 
-export function getPiSpawnCommand(
-  args: string[],
-  deps: PiSpawnDeps = {},
-): PiSpawnCommand {
+export function getPiSpawnCommand(args: string[], deps: PiSpawnDeps = {}): PiSpawnCommand {
   const piCliPath = resolveWindowsPiCliScript(deps);
   if (piCliPath) {
     return {

@@ -1,6 +1,7 @@
 import { activeObjective } from "../domain/state.ts";
 import type { GoalState } from "../domain/types.ts";
 import { formatElapsed, formatTokens, truncate } from "./format.ts";
+import { statusLabel } from "./statusline.ts";
 
 // Text returned to the model/tool caller and plain status panels.
 export function formatGoalForTool(goal: GoalState): string {
@@ -10,9 +11,7 @@ export function formatGoalForTool(goal: GoalState): string {
       ? "unbounded"
       : formatTokens(Math.max(0, goal.tokenBudget - goal.tokensUsed));
   const subtaskSummary =
-    (goal.subtasks?.length ?? 0) > 0
-      ? `Checklist: ${checklistSummaryText(goal)}`
-      : undefined;
+    (goal.subtasks?.length ?? 0) > 0 ? `Checklist: ${checklistSummaryText(goal)}` : undefined;
   if (goal.status === "complete") {
     return [
       "✅ Goal achieved",
@@ -26,9 +25,7 @@ export function formatGoalForTool(goal: GoalState): string {
       .join("\n");
   }
   return [
-    goal.status === "active"
-      ? "🎯 Goal active"
-      : `Goal: ${statusLabel(goal.status)}`,
+    goal.status === "active" ? "🎯 Goal active" : `Goal: ${statusLabel(goal.status)}`,
     `Objective: ${objective}`,
     `Time used: ${formatElapsed(goal.timeUsedSeconds)}`,
     `Tokens: ${formatTokens(goal.tokensUsed)}${goal.tokenBudget === null ? "" : ` / ${formatTokens(goal.tokenBudget)} (${remaining} remaining)`}`,
@@ -45,25 +42,16 @@ function formatExtraBudgets(goal: GoalState): string | undefined {
     parts.push(
       `time ${formatElapsed(goal.timeUsedSeconds)}/${formatElapsed(goal.timeBudgetSeconds)}`,
     );
-  if (goal.turnBudget != null)
-    parts.push(`turns ${goal.turnsUsed ?? 0}/${goal.turnBudget}`);
+  if (goal.turnBudget != null) parts.push(`turns ${goal.turnsUsed ?? 0}/${goal.turnBudget}`);
   if (goal.costBudgetUsd != null)
-    parts.push(
-      `cost $${(goal.costUsedUsd ?? 0).toFixed(4)}/$${goal.costBudgetUsd.toFixed(4)}`,
-    );
+    parts.push(`cost $${(goal.costUsedUsd ?? 0).toFixed(4)}/$${goal.costBudgetUsd.toFixed(4)}`);
   return parts.length ? `Budgets: ${parts.join(" · ")}` : undefined;
 }
 
-export function formatSubtaskUpdate(
-  goal: GoalState,
-  title: string,
-  completed: boolean,
-): string {
+export function formatSubtaskUpdate(goal: GoalState, title: string, completed: boolean): string {
   return [
     `${completed ? "☑" : "☐"} Subtask ${completed ? "completed" : "tracked"}: ${title}`,
-    (goal.subtasks?.length ?? 0) > 0
-      ? `Checklist: ${checklistSummaryText(goal)}`
-      : undefined,
+    (goal.subtasks?.length ?? 0) > 0 ? `Checklist: ${checklistSummaryText(goal)}` : undefined,
   ]
     .filter(Boolean)
     .join("\n");
@@ -82,13 +70,11 @@ export function completionBudgetReport(goal: GoalState): string {
     parts.push(
       `tokens used: ${formatTokens(goal.tokensUsed)} of ${formatTokens(goal.tokenBudget)}`,
     );
-  if (goal.timeUsedSeconds > 0)
-    parts.push(`time used: ${formatElapsed(goal.timeUsedSeconds)}`);
+  if (goal.timeUsedSeconds > 0) parts.push(`time used: ${formatElapsed(goal.timeUsedSeconds)}`);
   return parts.length
     ? `Goal achieved. Final budget usage: ${parts.join("; ")}.`
     : "Goal achieved.";
 }
-
 
 export function compactGoalStateForAgent(goal: GoalState): Record<string, unknown> {
   const incomplete = (goal.subtasks ?? []).filter((s) => !s.completed);
@@ -99,9 +85,7 @@ export function compactGoalStateForAgent(goal: GoalState): Record<string, unknow
     tokensUsed: goal.tokensUsed,
     tokenBudget: goal.tokenBudget,
     tokensRemaining:
-      goal.tokenBudget === null
-        ? null
-        : Math.max(0, goal.tokenBudget - goal.tokensUsed),
+      goal.tokenBudget === null ? null : Math.max(0, goal.tokenBudget - goal.tokensUsed),
     turnsUsed: goal.turnsUsed ?? 0,
     timeUsedSeconds: goal.timeUsedSeconds,
     timeBudgetSeconds: goal.timeBudgetSeconds ?? null,
@@ -110,10 +94,7 @@ export function compactGoalStateForAgent(goal: GoalState): Record<string, unknow
     costBudgetUsd: goal.costBudgetUsd ?? null,
     blockedReason: goal.blockedReason ?? null,
     blockedDetail: goal.blockedDetail ?? null,
-    incompleteSubtasks:
-      incomplete.length > 0
-        ? incomplete.map((s) => ({ title: s.title }))
-        : null,
+    incompleteSubtasks: incomplete.length > 0 ? incomplete.map((s) => ({ title: s.title })) : null,
     totalSubtasks: (goal.subtasks ?? []).length,
   };
 }

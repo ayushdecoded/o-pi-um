@@ -69,10 +69,7 @@ export async function approveGoalContract(
               panelWidth - 1,
             ) + bg(theme.fg("accent", "│")),
             pad("│", panelWidth - 1) + bg(theme.fg("accent", "│")),
-            ...shown.map(
-              (line) =>
-                pad(`│  ${line}`, panelWidth - 1) + bg(theme.fg("accent", "│")),
-            ),
+            ...shown.map((line) => pad(`│  ${line}`, panelWidth - 1) + bg(theme.fg("accent", "│"))),
             pad("│", panelWidth - 1) + bg(theme.fg("accent", "│")),
             pad(`│  ${help}`, panelWidth - 1) + bg(theme.fg("accent", "│")),
             bottom(panelWidth),
@@ -82,8 +79,7 @@ export async function approveGoalContract(
           md.invalidate();
         },
         handleInput(data: string) {
-          if (matchesKey(data, "enter") || data.toLowerCase() === "y")
-            return done(true);
+          if (matchesKey(data, "enter") || data.toLowerCase() === "y") return done(true);
           if (
             matchesKey(data, "escape") ||
             matchesKey(data, "ctrl+c") ||
@@ -93,8 +89,7 @@ export async function approveGoalContract(
           if (matchesKey(data, "down")) scroll += 1;
           else if (matchesKey(data, "up")) scroll = Math.max(0, scroll - 1);
           else if (matchesKey(data, "pageDown")) scroll += previewHeight;
-          else if (matchesKey(data, "pageUp"))
-            scroll = Math.max(0, scroll - previewHeight);
+          else if (matchesKey(data, "pageUp")) scroll = Math.max(0, scroll - previewHeight);
           tui.requestRender();
         },
       };
@@ -120,7 +115,6 @@ function goalContractMarkdown(goal: GoalState, objective: string): string {
   ].join("\n");
 }
 
-
 function previewLines(value: string, maxLines: number): string[] {
   const lines = value
     .split(/\r?\n/)
@@ -129,8 +123,6 @@ function previewLines(value: string, maxLines: number): string[] {
   const shown = lines
     .slice(0, maxLines)
     .map((line) => truncate(line.replace(/^[-*#\d.)\s]+/, ""), 110));
-  if (lines.length > maxLines)
-    shown.push(`… ${lines.length - maxLines} more lines`);
+  if (lines.length > maxLines) shown.push(`… ${lines.length - maxLines} more lines`);
   return shown.length ? shown : [truncate(value, 110)];
 }
-

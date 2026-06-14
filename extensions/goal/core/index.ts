@@ -1,10 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { compactGoalStateForAgent } from "../ui/text.ts";
-import {
-  goalHelpText,
-  pickWithSearch,
-  showSubagentDetails,
-} from "../ui/overlays.ts";
+import { goalHelpText, pickWithSearch, showSubagentDetails } from "../ui/overlays.ts";
 import { showGoalStatus } from "../ui/status.ts";
 import {
   clearCompletionBannerTimer,
@@ -30,10 +26,7 @@ import {
 } from "../runtime/analysis.ts";
 
 import { registerGoalTool } from "./tool.ts";
-import {
-  compactionRecoveryInstruction,
-  volatileGoalStatePrompt,
-} from "../prompt/prompts.ts";
+import { compactionRecoveryInstruction, volatileGoalStatePrompt } from "../prompt/prompts.ts";
 import { goalRef, readGoal, writeGoal } from "../runtime/store.ts";
 import { registerGoalCommands } from "./commands.ts";
 import { createGoalActions } from "./actions.ts";
@@ -79,8 +72,7 @@ export default function goalExpansion(pi: ExtensionAPI) {
   // After compaction, queue one normal continuation with the compacted summary as orientation.
   pi.on("session_compact", async (event, ctx) => {
     try {
-      if (runtime.lastCompactionContinuationId === event.compactionEntry.id)
-        return;
+      if (runtime.lastCompactionContinuationId === event.compactionEntry.id) return;
       const goal = await readGoal(goalRef(ctx));
       updateGoalUi(ctx, goal);
       if (!goal) return;
@@ -119,10 +111,10 @@ export default function goalExpansion(pi: ExtensionAPI) {
         ctx.isIdle() &&
         !ctx.hasPendingMessages()
       ) {
-        const choice = await ctx.ui.select(
-          `Resume paused goal?\nGoal: ${goal.intent}`,
-          ["Resume goal", "Leave paused"],
-        );
+        const choice = await ctx.ui.select(`Resume paused goal?\nGoal: ${goal.intent}`, [
+          "Resume goal",
+          "Leave paused",
+        ]);
         if (choice === "Resume goal") {
           if (!isApprovedGoal(goal)) return;
           goal.status = "active";
@@ -134,12 +126,7 @@ export default function goalExpansion(pi: ExtensionAPI) {
         }
         return;
       }
-      if (
-        isApprovedActiveGoal(goal) &&
-        ctx.hasUI &&
-        ctx.isIdle() &&
-        !ctx.hasPendingMessages()
-      ) {
+      if (isApprovedActiveGoal(goal) && ctx.hasUI && ctx.isIdle() && !ctx.hasPendingMessages()) {
         queueContinuation(pi, ctx, goal, "resume");
       }
     } catch {
@@ -152,9 +139,7 @@ export default function goalExpansion(pi: ExtensionAPI) {
     try {
       const goal = await readGoal(goalRef(ctx));
       return {
-        messages: event.messages.filter((message) =>
-          keepGoalMessageForState(message, goal),
-        ),
+        messages: event.messages.filter((message) => keepGoalMessageForState(message, goal)),
       };
     } catch {
       return;
@@ -215,8 +200,7 @@ export default function goalExpansion(pi: ExtensionAPI) {
   // Keep continuation identity in memory until agent_end.
   pi.on("turn_end", async (event) => {
     try {
-      const usage = (event.message as { usage?: Record<string, unknown> })
-        .usage;
+      const usage = (event.message as { usage?: Record<string, unknown> }).usage;
       const tokens = usage ? tokenUsageFromUsage(usage) : 0;
       if (tokens === 0) return;
       runtime.currentSubTurns.push({
@@ -242,27 +226,21 @@ export default function goalExpansion(pi: ExtensionAPI) {
       const nowSec = nowSeconds();
       if (goal.status === "active") {
         accountLiveElapsed(goal);
-      } else if (
-        !isApprovedGoal(goal) &&
-        runtime.activeTurnStartedAt !== null
-      ) {
+      } else if (!isApprovedGoal(goal) && runtime.activeTurnStartedAt !== null) {
         goal.timeUsedSeconds += Math.max(0, nowSec - turnStartedSeconds!);
         runtime.activeTurnStartedAt = null;
       }
 
-      if (
-        goal.status === "active" ||
-        runtime.completedThisTurnGoalId === goal.id
-      ) {
+      if (goal.status === "active" || runtime.completedThisTurnGoalId === goal.id) {
         const turnTokens = assistantTokenUsage(event.messages) + runtime.currentSubagentTokens;
         const turnDurationSec =
-          turnStartedSeconds !== null
-            ? Math.max(0, nowSec - turnStartedSeconds)
-            : 0;
+          turnStartedSeconds !== null ? Math.max(0, nowSec - turnStartedSeconds) : 0;
         const turnCalls = runtime.currentTurnToolCalls;
         goal.tokensUsed += turnTokens;
         goal.costUsedUsd =
-          (goal.costUsedUsd ?? 0) + assistantCostUsage(event.messages) + runtime.currentSubagentCostUsd;
+          (goal.costUsedUsd ?? 0) +
+          assistantCostUsage(event.messages) +
+          runtime.currentSubagentCostUsd;
         goal.turnsUsed = (goal.turnsUsed ?? 0) + 1;
         goal.subTurns = runtime.currentSubTurns;
         if (turnCalls > 0) goalMetrics(goal).toolCalls += turnCalls;

@@ -6,14 +6,15 @@ import { REQUIRED_MODEL_SECTIONS, validateModelsMd } from "./models.ts";
 export function registerModelCommands(pi: ExtensionAPI): void {
   pi.registerCommand("models", {
     description: "Inspect or bootstrap project model routes in .pi/MODELS.md",
-    handler: async (args, ctx) => withCommandErrors(ctx, async () => {
-      const action = args.trim().toLowerCase();
-      if (action === "setup" || action === "bootstrap") {
-        await bootstrapModels(pi, ctx);
-        return;
-      }
-      showModelsStatus(ctx);
-    }),
+    handler: async (args, ctx) =>
+      withCommandErrors(ctx, async () => {
+        const action = args.trim().toLowerCase();
+        if (action === "setup" || action === "bootstrap") {
+          await bootstrapModels(pi, ctx);
+          return;
+        }
+        showModelsStatus(ctx);
+      }),
   });
 }
 
@@ -34,10 +35,13 @@ async function bootstrapModels(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   const modelsFile = path.join(ctx.cwd, ".pi", "MODELS.md");
   if (fs.existsSync(modelsFile)) {
     if (!ctx.hasUI) {
-      ctx.ui.notify(".pi/MODELS.md already exists; edit it directly or rerun in the UI to confirm overwrite.", "warning");
+      ctx.ui.notify(
+        ".pi/MODELS.md already exists; edit it directly or rerun in the UI to confirm overwrite.",
+        "warning",
+      );
       return;
     }
-    const ok = await ctx.ui.confirm("Overwrite existing .pi/MODELS.md?");
+    const ok = await ctx.ui.confirm("Overwrite existing .pi/MODELS.md?", "");
     if (!ok) return;
   }
   const available = ctx.modelRegistry.getAvailable();
@@ -67,6 +71,9 @@ async function withCommandErrors(ctx: ExtensionContext, fn: () => Promise<void>)
   try {
     await fn();
   } catch (error) {
-    ctx.ui.notify(`Models command failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    ctx.ui.notify(
+      `Models command failed: ${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
   }
 }

@@ -2,13 +2,18 @@
   "name": "o-pi-um",
   "version": "0.1.0",
   "private": true,
-  "description": "Arayush's Pi extension package. Includes the goal loop extension.",
+  "description": "Arayush's Pi extension package: goal loop and tmux-backed subagents.",
   "keywords": [
     "pi-package"
   ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
@@ -18,5 +23,10 @@
       "./extensions/goal/index.ts",
       "./extensions/subagent/index.ts"
     ]
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "prettier": "^3.8.4",
+    "typescript": "^6.0.3"
   }
 }

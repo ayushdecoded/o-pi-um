@@ -27,7 +27,10 @@ export function renderPanel(ctx: ExtensionContext): void {
       ...runs.slice(0, 10).map((run) => {
         const age = Math.max(0, Math.round((Date.now() - run.startedAt) / 1000));
         const model = run.model ? ` · ${run.model}` : "";
-        return ctx.ui.theme.fg("dim", `  ${run.id.slice(0, 8)} · ${age}s · ${shortTask(run.task)}${model}`);
+        return ctx.ui.theme.fg(
+          "dim",
+          `  ${run.id.slice(0, 8)} · ${age}s · ${shortTask(run.task)}${model}`,
+        );
       }),
     ],
     { placement: "aboveEditor" },

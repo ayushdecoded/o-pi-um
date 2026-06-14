@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 import type { GoalState } from "../domain/types.ts";
+import { truncate } from "../ui/format.ts";
 
 // Fallback live estimate for in-progress turns before provider usage arrives.
 // Final accounting uses actual assistant usage fields when available.
@@ -17,15 +18,12 @@ export function estimateMessageTokens(message: AgentMessage): number {
       if (typeof part.text === "string") totalChars += part.text.length;
       // Thinking / reasoning blocks
       if (typeof part.thinking === "string") totalChars += part.thinking.length;
-      if (typeof part.reasoning === "string")
-        totalChars += part.reasoning.length;
+      if (typeof part.reasoning === "string") totalChars += part.reasoning.length;
       // Tool calls
       if (part.type === "toolCall" && typeof part.name === "string") {
         totalChars += part.name.length;
-        if (typeof part.arguments === "string")
-          totalChars += part.arguments.length;
-        else if (isRecord(part.arguments))
-          totalChars += JSON.stringify(part.arguments).length;
+        if (typeof part.arguments === "string") totalChars += part.arguments.length;
+        else if (isRecord(part.arguments)) totalChars += JSON.stringify(part.arguments).length;
       }
     }
   }
@@ -47,12 +45,7 @@ export function assistantTokenUsage(messages: AgentMessage[]): number {
 // Normalize usage shapes across providers. Cache reads are subtracted so goal budget tracks
 // effective new context/output rather than repeatedly charging cached prompt tokens.
 export function tokenUsageFromUsage(usage: Record<string, unknown>): number {
-  const input = firstNumberField(usage, [
-    "input",
-    "input_tokens",
-    "prompt_tokens",
-    "promptTokens",
-  ]);
+  const input = firstNumberField(usage, ["input", "input_tokens", "prompt_tokens", "promptTokens"]);
   const output = firstNumberField(usage, [
     "output",
     "output_tokens",
@@ -95,11 +88,9 @@ export function assistantCostUsage(messages: AgentMessage[]): number {
 export function goalBudgetExceeded(goal: GoalState): boolean {
   return (
     (goal.tokenBudget !== null && goal.tokensUsed >= goal.tokenBudget) ||
-    (goal.timeBudgetSeconds != null &&
-      goal.timeUsedSeconds >= goal.timeBudgetSeconds) ||
+    (goal.timeBudgetSeconds != null && goal.timeUsedSeconds >= goal.timeBudgetSeconds) ||
     (goal.turnBudget != null && (goal.turnsUsed ?? 0) >= goal.turnBudget) ||
-    (goal.costBudgetUsd != null &&
-      (goal.costUsedUsd ?? 0) >= goal.costBudgetUsd)
+    (goal.costBudgetUsd != null && (goal.costUsedUsd ?? 0) >= goal.costBudgetUsd)
   );
 }
 
@@ -112,10 +103,7 @@ function numberField(obj: Record<string, unknown>, key: string): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function firstNumberField(
-  obj: Record<string, unknown>,
-  keys: string[],
-): number {
+function firstNumberField(obj: Record<string, unknown>, keys: string[]): number {
   for (const key of keys) {
     const value = numberField(obj, key);
     if (value > 0) return value;
@@ -123,10 +111,7 @@ function firstNumberField(
   return 0;
 }
 
-function nestedNumberField(
-  obj: Record<string, unknown>,
-  path: string[],
-): number {
+function nestedNumberField(obj: Record<string, unknown>, path: string[]): number {
   let current: unknown = obj;
   for (const key of path) {
     if (!isRecord(current)) return 0;
@@ -139,10 +124,7 @@ export function looksAborted(messages: AgentMessage[]): boolean {
   return messages.some((m) => {
     const stop = (m as { stopReason?: string }).stopReason;
     const error = (m as { errorMessage?: string }).errorMessage;
-    return (
-      stop === "aborted" ||
-      /aborted|interrupted|cancelled|canceled/i.test(error ?? "")
-    );
+    return stop === "aborted" || /aborted|interrupted|cancelled|canceled/i.test(error ?? "");
   });
 }
 
@@ -164,10 +146,7 @@ export function assistantQuestionText(messages: AgentMessage[]): string | null {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const question =
-    [...lines].reverse().find((line) => /[?？]/.test(line)) ??
-    lines.at(-1) ??
-    text;
+  const question = [...lines].reverse().find((line) => /[?？]/.test(line)) ?? lines.at(-1) ?? text;
   return truncate(question, 220);
 }
 

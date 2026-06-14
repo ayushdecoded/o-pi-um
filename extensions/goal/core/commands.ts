@@ -7,24 +7,59 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { THINKING_LEVELS } from "../domain/constants.ts";
 import { parseGoalIntent } from "../domain/intent.ts";
-import { isApprovedActiveGoal, isApprovedGoal, normalizedObjectives, nowSeconds, touchGoal } from "../domain/state.ts";
+import {
+  isApprovedActiveGoal,
+  isApprovedGoal,
+  normalizedObjectives,
+  nowSeconds,
+  touchGoal,
+} from "../domain/state.ts";
 import type { GoalModelOverride, GoalState, ThinkingLevel } from "../domain/types.ts";
-import { goalRef, readGoal, readGoalModelOverride, setGoalModelOverride, writeGoal } from "../runtime/store.ts";
+import {
+  goalRef,
+  readGoal,
+  readGoalModelOverride,
+  setGoalModelOverride,
+  writeGoal,
+} from "../runtime/store.ts";
 
 export type GoalCommandDeps = {
-  showGoalStatus: (ctx: ExtensionContext, goal: GoalState | null, pendingModelOverride?: GoalModelOverride) => Promise<void>;
+  showGoalStatus: (
+    ctx: ExtensionContext,
+    goal: GoalState | null,
+    pendingModelOverride?: GoalModelOverride,
+  ) => Promise<void>;
   updateGoalUi: (ctx: ExtensionContext, goal: GoalState | null) => void;
   showSubagentDetails: (ctx: ExtensionContext) => Promise<void>;
   goalHelpText: () => string;
-  pickWithSearch: (ctx: ExtensionContext, title: string, items: Array<{ value: string; label: string }>) => Promise<{ value: string; label: string } | undefined>;
+  pickWithSearch: (
+    ctx: ExtensionContext,
+    title: string,
+    items: Array<{ value: string; label: string }>,
+  ) => Promise<{ value: string; label: string } | undefined>;
   queueSetup: (pi: ExtensionAPI, goal: GoalState) => void;
-  queueContinuation: (pi: ExtensionAPI, ctx: ExtensionContext, goal: GoalState, reason: string) => void;
+  queueContinuation: (
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    goal: GoalState,
+    reason: string,
+  ) => void;
   clearRuntimeFlags: () => void;
   accountLiveElapsed: (goal: GoalState) => void;
 };
 
 export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): void {
-  const { showGoalStatus, updateGoalUi, showSubagentDetails, goalHelpText, pickWithSearch, queueSetup, queueContinuation, clearRuntimeFlags, accountLiveElapsed } = deps;
+  const {
+    showGoalStatus,
+    updateGoalUi,
+    showSubagentDetails,
+    goalHelpText,
+    pickWithSearch,
+    queueSetup,
+    queueContinuation,
+    clearRuntimeFlags,
+    accountLiveElapsed,
+  } = deps;
 
   pi.registerCommand("agents", {
     description: "Show active goal/subagent details",
@@ -57,10 +92,7 @@ export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): v
             return;
           }
           if (!extText) {
-            ctx.ui.notify(
-              "Usage: /goal expand <additional objective>",
-              "warning",
-            );
+            ctx.ui.notify("Usage: /goal expand <additional objective>", "warning");
             return;
           }
           goal.objectives = normalizedObjectives(goal);
@@ -121,8 +153,7 @@ export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): v
           if (
             !goal ||
             !isApprovedGoal(goal) ||
-            (goal.status !== "paused" &&
-              goal.blockedReason !== "waiting_on_user")
+            (goal.status !== "paused" && goal.blockedReason !== "waiting_on_user")
           ) {
             ctx.ui.notify("No paused or blocked goal to resume.", "warning");
             return;
@@ -163,8 +194,7 @@ export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): v
           if (!ok) return;
         }
 
-        const modelOverride =
-          goal?.modelOverride ?? (await readGoalModelOverride(ref));
+        const modelOverride = goal?.modelOverride ?? (await readGoalModelOverride(ref));
         const next: GoalState = {
           id: randomUUID(),
           threadId: ref.threadId,
@@ -205,8 +235,7 @@ export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): v
         const ref = goalRef(ctx);
         const goal = await readGoal(ref);
         const allModels = ctx.modelRegistry.getAvailable();
-        const allAuth =
-          allModels.length > 0 ? allModels : ctx.modelRegistry.getAll();
+        const allAuth = allModels.length > 0 ? allModels : ctx.modelRegistry.getAll();
         const enabledSet = new Set(scopedModels());
         const models =
           enabledSet.size > 0
@@ -237,20 +266,13 @@ export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): v
           ctx.ui.notify("Goal model override cleared", "info");
           return;
         }
-        const model =
-          chosen.value === "__current" && currentModel
-            ? currentModel
-            : chosen.value;
+        const model = chosen.value === "__current" && currentModel ? currentModel : chosen.value;
         const currentThinking = pi.getThinkingLevel();
         const thinkingItems: Array<{ value: string; label: string }> = [
           { value: "__current", label: `current (${currentThinking})` },
           ...THINKING_LEVELS.map((t) => ({ value: t, label: t })),
         ];
-        const thinkingChoice = await pickWithSearch(
-          ctx,
-          "Goal thinking level",
-          thinkingItems,
-        );
+        const thinkingChoice = await pickWithSearch(ctx, "Goal thinking level", thinkingItems);
         if (!thinkingChoice) return;
         const thinking =
           thinkingChoice.value === "__current"
@@ -266,8 +288,6 @@ export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): v
         );
       }),
   });
-
-
 }
 
 async function withCommandErrors(ctx: ExtensionContext, fn: () => Promise<void>): Promise<void> {

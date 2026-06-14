@@ -8,10 +8,16 @@ export async function runCommand(command: string, args: string[]): Promise<Comma
     const proc = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
-    proc.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    proc.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
     proc.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
-    proc.on("error", (error) => resolve({ code: 1, stdout, stderr: error instanceof Error ? error.message : String(error) }));
+    proc.on("error", (error) =>
+      resolve({ code: 1, stdout, stderr: error instanceof Error ? error.message : String(error) }),
+    );
   });
 }
 
@@ -20,5 +26,9 @@ export function shellQuote(value: string): string {
 }
 
 export function safeRead(file: string): string {
-  try { return fs.readFileSync(file, "utf8"); } catch { return ""; }
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
 }

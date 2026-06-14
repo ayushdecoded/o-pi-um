@@ -26,14 +26,26 @@ export type PiRunInput = {
 export async function runPiInTmux(input: PiRunInput): Promise<RunDetails> {
   // This is the only place that actually launches Pi. Callers decide whether the
   // session is new or a follow-up; this function just builds a tmux-backed run.
-  if (!(await tmuxAvailable())) return failedRun(input, "tmux is required for subagent runs but was not found");
+  if (!(await tmuxAvailable()))
+    return failedRun(input, "tmux is required for subagent runs but was not found");
   const paths = runPaths(input.id);
   const args = piArgs(input);
   const spawnSpec = getPiSpawnCommand(args);
   const command = [spawnSpec.command, ...spawnSpec.args].map(shellQuote).join(" ");
   // A small script gives every run inspectable artifacts: stdout JSONL, stderr,
   // and an exit sentinel that the parent can wait on without owning the child fd.
-  fs.writeFileSync(paths.scriptFile, renderRunScript({ cwd: input.cwd, depth: input.depth, command, stdoutFile: paths.stdoutFile, stderrFile: paths.stderrFile, statusFile: paths.statusFile }), { mode: 0o700 });
+  fs.writeFileSync(
+    paths.scriptFile,
+    renderRunScript({
+      cwd: input.cwd,
+      depth: input.depth,
+      command,
+      stdoutFile: paths.stdoutFile,
+      stderrFile: paths.stderrFile,
+      statusFile: paths.statusFile,
+    }),
+    { mode: 0o700 },
+  );
   const tmuxSession = tmuxName(input.id);
   const startError = await startTmuxScript(tmuxSession, paths.scriptFile);
   if (startError) return failedRun(input, startError);
@@ -42,7 +54,19 @@ export async function runPiInTmux(input: PiRunInput): Promise<RunDetails> {
   const output = messages.length ? finalTextFromMessage(messages[messages.length - 1]!) : "";
   const usage = usageFromMessages(messages);
   const stderr = safeRead(paths.stderrFile).trim();
-  return { id: input.id, task: input.task, model: input.model, status: exitCode === 0 ? "complete" : "failed", exitCode, output, sessionFile: input.sessionFile, usage, ...(exitCode === 0 ? {} : { error: stderr || `pi exited with code ${exitCode}` }), startedAt: input.startedAt, completedAt: Date.now() };
+  return {
+    id: input.id,
+    task: input.task,
+    model: input.model,
+    status: exitCode === 0 ? "complete" : "failed",
+    exitCode,
+    output,
+    sessionFile: input.sessionFile,
+    usage,
+    ...(exitCode === 0 ? {} : { error: stderr || `pi exited with code ${exitCode}` }),
+    startedAt: input.startedAt,
+    completedAt: Date.now(),
+  };
 }
 
 function piArgs(input: PiRunInput): string[] {
@@ -56,7 +80,14 @@ function piArgs(input: PiRunInput): string[] {
   return args;
 }
 
-function renderRunScript(input: { cwd: string; depth: number; command: string; stdoutFile: string; stderrFile: string; statusFile: string }): string {
+function renderRunScript(input: {
+  cwd: string;
+  depth: number;
+  command: string;
+  stdoutFile: string;
+  stderrFile: string;
+  statusFile: string;
+}): string {
   return `#!/usr/bin/env bash
 set +e
 cd ${shellQuote(input.cwd)}
@@ -76,5 +107,14 @@ rl.on('line',(line)=>{try{const event=JSON.parse(line);if(event.type==='message_
 }
 
 function failedRun(input: PiRunInput, error: string): RunDetails {
-  return { id: input.id, task: input.task, model: input.model, status: "failed", error, sessionFile: input.sessionFile, startedAt: input.startedAt, completedAt: Date.now() };
+  return {
+    id: input.id,
+    task: input.task,
+    model: input.model,
+    status: "failed",
+    error,
+    sessionFile: input.sessionFile,
+    startedAt: input.startedAt,
+    completedAt: Date.now(),
+  };
 }
