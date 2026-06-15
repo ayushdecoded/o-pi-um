@@ -22,7 +22,8 @@
   "pi": {
     "extensions": [
       "./extensions/goal/index.ts",
-      "./extensions/subagent/index.ts"
+      "./extensions/subagent/index.ts",
+      "./extensions/browser/index.ts"
     ]
   },
   "devDependencies": {
