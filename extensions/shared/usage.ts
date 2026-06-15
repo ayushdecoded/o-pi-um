@@ -1,5 +1,6 @@
 export type TokenSplit = { inputTokens: number; outputTokens: number };
 export type ToolUsage = { tokens: number; costUsd: number };
+export type UsageTotals = { inputTokens: number; outputTokens: number; costUsd: number };
 
 export function goalTokenUsageFromUsage(usage: Record<string, unknown>): number {
   const input = firstNumberField(usage, ["input", "input_tokens", "prompt_tokens", "promptTokens"]);
@@ -45,17 +46,56 @@ export function usageCostFromUsage(usage: Record<string, unknown>): number {
   return Math.max(0, cost);
 }
 
-export function subagentToolResultUsage(result: unknown): ToolUsage {
+export function usageTotalsFromUsage(usage: Record<string, unknown>): UsageTotals {
+  const split = subagentTokenSplitFromUsage(usage);
+  return { ...split, costUsd: usageCostFromUsage(usage) };
+}
+
+export function cacheHitRateFromUsage(usage: Record<string, unknown>): number | undefined {
+  const input = firstNumberField(usage, ["input", "input_tokens", "prompt_tokens", "promptTokens"]);
+  const cacheRead = firstNumberField(usage, [
+    "cacheRead",
+    "cache_read",
+    "cached_input_tokens",
+    "cachedInputTokens",
+  ]);
+  const cacheWrite = firstNumberField(usage, [
+    "cacheWrite",
+    "cache_write",
+    "cachedInputWriteTokens",
+  ]);
+  const promptTokens = input + cacheRead + cacheWrite;
+  return promptTokens > 0 && (cacheRead > 0 || cacheWrite > 0)
+    ? (cacheRead / promptTokens) * 100
+    : undefined;
+}
+
+export function addUsageTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    costUsd: a.costUsd + b.costUsd,
+  };
+}
+
+export function subagentToolResultTotals(result: unknown): UsageTotals {
   const details = isRecord(result) ? result.details : undefined;
   const runs = isRecord(details) && Array.isArray(details.runs) ? details.runs : [];
-  let tokens = 0;
-  let costUsd = 0;
+  let totals: UsageTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   for (const run of runs) {
     if (!isRecord(run) || !isRecord(run.usage)) continue;
-    tokens += numberField(run.usage, "tokens");
-    costUsd += numberField(run.usage, "costUsd");
+    totals = addUsageTotals(totals, {
+      inputTokens: numberField(run.usage, "inputTokens"),
+      outputTokens: numberField(run.usage, "outputTokens"),
+      costUsd: numberField(run.usage, "costUsd"),
+    });
   }
-  return { tokens, costUsd };
+  return totals;
+}
+
+export function subagentToolResultUsage(result: unknown): ToolUsage {
+  const totals = subagentToolResultTotals(result);
+  return { tokens: totals.inputTokens + totals.outputTokens, costUsd: totals.costUsd };
 }
 
 export function firstNumberField(record: Record<string, unknown>, keys: string[]): number {

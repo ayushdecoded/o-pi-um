@@ -1,18 +1,12 @@
 import type { Message } from "@earendil-works/pi-ai";
-import { subagentTokenSplitFromUsage, usageCostFromUsage } from "../shared/usage.ts";
+import { addUsageTotals, usageTotalsFromUsage, type UsageTotals } from "../shared/usage.ts";
 import type { RunUsage } from "./types.ts";
 
 export function usageFromMessages(messages: Message[]): RunUsage {
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let costUsd = 0;
+  let totals: UsageTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   for (const message of messages) {
     const usage = (message as { usage?: Record<string, unknown> }).usage;
-    if (!usage) continue;
-    const split = subagentTokenSplitFromUsage(usage);
-    inputTokens += split.inputTokens;
-    outputTokens += split.outputTokens;
-    costUsd += usageCostFromUsage(usage);
+    if (usage) totals = addUsageTotals(totals, usageTotalsFromUsage(usage));
   }
-  return { inputTokens, outputTokens, tokens: inputTokens + outputTokens, costUsd };
+  return { ...totals, tokens: totals.inputTokens + totals.outputTokens };
 }

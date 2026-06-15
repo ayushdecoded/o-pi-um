@@ -16,6 +16,7 @@ Keep extensions small, explicit, and easy for models to use.
 goal        goal lifecycle, state, UI, accounting
 subagent    child Pi sessions, model routing, child usage
 compaction  context threshold policy and routed compaction model
+footer      TUI footer usage/status display
 browser     local browser automation
 web_search  search, fetch, parse, Markdown formatting
 shared      small cross-extension primitives

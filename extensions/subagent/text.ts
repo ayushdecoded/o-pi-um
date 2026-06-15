@@ -1,4 +1,5 @@
 import type { Message } from "@earendil-works/pi-ai";
+import { formatCost } from "../shared/format.ts";
 import type { RunDetails } from "./types.ts";
 
 // Child Pi JSON mode gives structured messages; tool results should return only final assistant text.
@@ -27,9 +28,6 @@ export function formatRun(run: RunDetails): string {
     `Status: ${run.status}`,
     run.model ? `Model: ${run.model}` : undefined,
     run.sessionFile ? `Session: ${run.sessionFile}` : undefined,
-    run.usage
-      ? `Usage: ${run.usage.inputTokens} in / ${run.usage.outputTokens} out (${run.usage.tokens} tokens)${run.usage.costUsd ? `, $${run.usage.costUsd.toFixed(4)}` : ""}`
-      : undefined,
     run.error ? `Error: ${run.error}` : undefined,
     run.output ? "" : undefined,
     run.output || undefined,
@@ -49,10 +47,6 @@ export function formatParallelRuns(runs: RunDetails[]): string {
     );
     if (run.model) lines.push(`Model: ${run.model}`);
     if (run.sessionFile) lines.push(`Session: ${run.sessionFile}`);
-    if (run.usage)
-      lines.push(
-        `Usage: ${run.usage.inputTokens} in / ${run.usage.outputTokens} out (${run.usage.tokens} tokens)${run.usage.costUsd ? `, $${run.usage.costUsd.toFixed(4)}` : ""}`,
-      );
     if (run.error) lines.push(`Error: ${run.error}`);
     if (run.output) lines.push("", run.output);
   }
@@ -100,7 +94,7 @@ function renderRunSummary(
     );
   if (run.usage)
     lines.push(
-      `  ${theme.fg("muted", "usage")} ${theme.fg("toolOutput", `${run.usage.inputTokens} in / ${run.usage.outputTokens} out · ${run.usage.tokens} tokens${run.usage.costUsd ? ` · $${run.usage.costUsd.toFixed(4)}` : ""}`)}`,
+      `  ${theme.fg("muted", "usage")} ${theme.fg("toolOutput", `${run.usage.inputTokens} in / ${run.usage.outputTokens} out · ${run.usage.tokens} tokens${run.usage.costUsd ? ` · $${formatCost(run.usage.costUsd, 4)}` : ""}`)}`,
     );
   if (run.error) lines.push(`  ${theme.fg("error", oneLine(run.error, 220))}`);
   if (run.output?.trim()) {

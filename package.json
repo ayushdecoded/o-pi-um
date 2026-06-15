@@ -24,6 +24,7 @@
       "./extensions/goal/index.ts",
       "./extensions/subagent/index.ts",
       "./extensions/compaction/index.ts",
+      "./extensions/footer/index.ts",
       "./extensions/browser/index.ts",
       "./extensions/web-search/index.ts"
     ]

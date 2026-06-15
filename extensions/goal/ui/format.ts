@@ -1,3 +1,5 @@
+import { formatCompactNumber } from "../../shared/format.ts";
+
 // Small shared formatting helpers. Keep dumb and dependency-free.
 export function formatElapsed(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0s";
@@ -11,12 +13,7 @@ export function formatElapsed(seconds: number): string {
   return mm ? `${h}h${mm}m` : `${h}h`;
 }
 
-export function formatTokens(tokens: number): string {
-  if (!Number.isFinite(tokens)) return "0";
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
-  return String(Math.round(tokens));
-}
+export const formatTokens = formatCompactNumber;
 
 export function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;

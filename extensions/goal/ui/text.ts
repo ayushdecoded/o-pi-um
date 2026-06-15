@@ -1,3 +1,4 @@
+import { formatCost } from "../../shared/format.ts";
 import { activeObjective } from "../domain/state.ts";
 import type { GoalState } from "../domain/types.ts";
 import { formatElapsed, formatTokens, truncate } from "./format.ts";
@@ -44,7 +45,9 @@ function formatExtraBudgets(goal: GoalState): string | undefined {
     );
   if (goal.turnBudget != null) parts.push(`turns ${goal.turnsUsed ?? 0}/${goal.turnBudget}`);
   if (goal.costBudgetUsd != null)
-    parts.push(`cost $${(goal.costUsedUsd ?? 0).toFixed(4)}/$${goal.costBudgetUsd.toFixed(4)}`);
+    parts.push(
+      `cost $${formatCost(goal.costUsedUsd ?? 0, 4)}/$${formatCost(goal.costBudgetUsd, 4)}`,
+    );
   return parts.length ? `Budgets: ${parts.join(" · ")}` : undefined;
 }
 

@@ -64,7 +64,7 @@ export function statusLine(ctx: ExtensionContext, goal: GoalState): string {
   if (goal.status === "paused") return theme.fg("accent", `Goal paused (/goal resume)${checklist}`);
   return theme.fg(
     "success",
-    `Goal achieved (${goal.tokenBudget === null ? formatElapsed(goal.timeUsedSeconds) : `${formatTokens(goal.tokensUsed)} tokens`}${objBadge}${checklist})`,
+    `Goal achieved (${formatElapsed(goal.timeUsedSeconds)} · ${formatTokens(goal.tokensUsed)} tokens${objBadge}${checklist})`,
   );
 }
 

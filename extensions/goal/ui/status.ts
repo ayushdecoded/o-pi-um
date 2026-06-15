@@ -2,6 +2,7 @@ import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Markdown, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 
+import { formatCost } from "../../shared/format.ts";
 import { activeObjective, goalMetrics, isApprovedGoal } from "../domain/state.ts";
 import type { GoalModelOverride, GoalState } from "../domain/types.ts";
 import { formatElapsed, formatTokens } from "./format.ts";
@@ -116,7 +117,7 @@ export function goalPanelPlaintext(
       : undefined,
     goal.turnBudget != null ? `Turn budget: ${goal.turnsUsed ?? 0}/${goal.turnBudget}` : undefined,
     goal.costBudgetUsd != null
-      ? `Cost budget: $${(goal.costUsedUsd ?? 0).toFixed(4)}/$${goal.costBudgetUsd.toFixed(4)}`
+      ? `Cost budget: $${formatCost(goal.costUsedUsd ?? 0, 4)}/$${formatCost(goal.costBudgetUsd, 4)}`
       : undefined,
     goal.metrics
       ? `Runtime: ${goal.metrics.toolCalls} tools, ${goal.metrics.continuationsStarted} continuations`
@@ -159,7 +160,7 @@ export function goalStatusMarkdown(
     `- Tokens: ${formatTokens(exactGoalTokensSoFar(goal))}${goal.tokenBudget !== null ? ` / ${formatTokens(goal.tokenBudget)}` : ""}`,
     goal.turnBudget != null ? `- Turns: ${goal.turnsUsed ?? 0} / ${goal.turnBudget}` : undefined,
     goal.costBudgetUsd != null
-      ? `- Cost: $${(goal.costUsedUsd ?? 0).toFixed(4)} / $${goal.costBudgetUsd.toFixed(4)}`
+      ? `- Cost: $${formatCost(goal.costUsedUsd ?? 0, 4)} / $${formatCost(goal.costBudgetUsd, 4)}`
       : undefined,
   ]
     .filter(Boolean)
