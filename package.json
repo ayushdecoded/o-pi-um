@@ -23,7 +23,8 @@
     "extensions": [
       "./extensions/goal/index.ts",
       "./extensions/subagent/index.ts",
-      "./extensions/browser/index.ts"
+      "./extensions/browser/index.ts",
+      "./extensions/web-search/index.ts"
     ]
   },
   "devDependencies": {
