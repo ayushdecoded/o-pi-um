@@ -15,6 +15,7 @@ Keep extensions small, explicit, and easy for models to use.
 ```text
 goal        goal lifecycle, state, UI, accounting
 subagent    child Pi sessions, model routing, child usage
+compaction  context threshold policy and routed compaction model
 browser     local browser automation
 web_search  search, fetch, parse, Markdown formatting
 shared      small cross-extension primitives
@@ -33,6 +34,8 @@ action, target, text
 query, url, mode, section
 task, tasks, sessionFile, options
 ```
+
+Some extensions, like `compaction`, expose no model-facing tool and only attach lifecycle policy.
 
 Avoid:
 
@@ -75,5 +78,6 @@ package-lock.json
 
 - `extensions/goal/docs/`
 - `extensions/subagent/docs/`
+- `extensions/compaction/README.md`
 - `extensions/browser/docs/`
 - `extensions/web-search/docs/`

@@ -6,6 +6,7 @@ Personal Pi extension package.
 
 - `goal`: durable goal loop with guarded continuation, budgets, status UI, and lifecycle accounting.
 - `subagent`: tmux-backed child Pi sessions, parallel fan-out, follow-ups by `sessionFile`, and project model routes.
+- `compaction`: automatic 80% context compaction using the `.pi/MODELS.md` `Compaction` route.
 - `browser`: local browser automation with compact snapshots and element refs. Public params are `action`, `target`, and `text`.
 - `web_search`: DuckDuckGo Lite search and URL reading with Markdown output, page structure modes, sections, and newline-separated multi-search/multi-fetch.
 
@@ -15,6 +16,7 @@ Personal Pi extension package.
 extensions/
   goal/          goal loop, state, UI, accounting, prompt helpers
   subagent/      tmux-backed child sessions and model routing
+  compaction/    80% context compaction with routed summary model
   browser/       Chrome/CDP and Zen/Firefox BiDi browser automation
   web-search/    DuckDuckGo Lite search, page fetching, parsing, formatting
   shared/        small shared primitives
@@ -61,5 +63,6 @@ rg --glob '!node_modules/**' --glob '!.git/**' <query>
 
 - Goal docs: `extensions/goal/docs/`
 - Subagent docs: `extensions/subagent/docs/`
+- Compaction docs: `extensions/compaction/README.md`
 - Browser docs: `extensions/browser/docs/`
 - Web search docs: `extensions/web-search/docs/`

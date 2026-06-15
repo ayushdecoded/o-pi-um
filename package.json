@@ -2,7 +2,7 @@
   "name": "o-pi-um",
   "version": "0.1.0",
   "private": true,
-  "description": "Arayush's Pi extension package: goal loop and tmux-backed subagents.",
+  "description": "Arayush's Pi extension package: goal, subagents, compaction, browser, and web search.",
   "keywords": [
     "pi-package"
   ],
@@ -23,6 +23,7 @@
     "extensions": [
       "./extensions/goal/index.ts",
       "./extensions/subagent/index.ts",
+      "./extensions/compaction/index.ts",
       "./extensions/browser/index.ts",
       "./extensions/web-search/index.ts"
     ]
