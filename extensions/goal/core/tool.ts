@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { isApprovedGoal } from "../domain/state.ts";
 import type { GoalToolParams } from "../domain/types.ts";
 import { GoalToolParamsSchema } from "../params.ts";
-import { goalRef, readGoal } from "../runtime/store.ts";
+import { goalRef, readGoal, readGoalEnabled } from "../runtime/store.ts";
 
 export type GoalToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -50,6 +50,8 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
     parameters: GoalToolParamsSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
+        if (!(await readGoalEnabled(goalRef(ctx))))
+          return toolResponse("Goal mode is disabled. Use /goal_mode on to enable it.", true);
         const action = params.action as string | undefined;
         if (params.contract !== undefined) {
           const ref = goalRef(ctx);

@@ -39,6 +39,7 @@ export async function readGoalFile(ref: GoalStoreRef): Promise<GoalFile> {
       version: GOAL_FILE_VERSION,
       goal: isGoalState(parsed.goal) ? parsed.goal : null,
       ...(isGoalModelOverride(parsed.modelOverride) ? { modelOverride: parsed.modelOverride } : {}),
+      ...(parsed.goalEnabled === false ? { goalEnabled: false } : {}),
     };
   } catch (err) {
     if ((err as { code?: string }).code === "ENOENT")
@@ -59,6 +60,10 @@ export async function readGoalModelOverride(
   ref: GoalStoreRef,
 ): Promise<GoalModelOverride | undefined> {
   return (await readGoalFile(ref)).modelOverride;
+}
+
+export async function readGoalEnabled(ref: GoalStoreRef): Promise<boolean> {
+  return (await readGoalFile(ref)).goalEnabled !== false;
 }
 
 async function quarantineCorruptGoalFile(ref: GoalStoreRef): Promise<void> {
@@ -84,6 +89,7 @@ export async function writeGoal(ref: GoalStoreRef, goal: GoalState | null): Prom
     version: GOAL_FILE_VERSION,
     goal,
     ...(existing.modelOverride ? { modelOverride: existing.modelOverride } : {}),
+    ...(existing.goalEnabled === false ? { goalEnabled: false } : {}),
   });
 }
 
@@ -99,6 +105,17 @@ export async function setGoalModelOverride(
     version: GOAL_FILE_VERSION,
     goal,
     ...(modelOverride ? { modelOverride } : {}),
+    ...(existing.goalEnabled === false ? { goalEnabled: false } : {}),
+  });
+}
+
+export async function setGoalEnabled(ref: GoalStoreRef, enabled: boolean): Promise<void> {
+  const existing = await readGoalFile(ref);
+  await writeGoalFile(ref, {
+    version: GOAL_FILE_VERSION,
+    goal: existing.goal,
+    ...(existing.modelOverride ? { modelOverride: existing.modelOverride } : {}),
+    ...(enabled ? {} : { goalEnabled: false }),
   });
 }
 

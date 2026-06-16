@@ -66,6 +66,7 @@ export type GoalFile = {
   version: 1;
   goal: GoalState | null;
   modelOverride?: GoalModelOverride;
+  goalEnabled?: boolean;
 };
 
 export type GoalToolParams = {

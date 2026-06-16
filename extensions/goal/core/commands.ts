@@ -18,10 +18,13 @@ import type { GoalModelOverride, GoalState, ThinkingLevel } from "../domain/type
 import {
   goalRef,
   readGoal,
+  readGoalEnabled,
   readGoalModelOverride,
+  setGoalEnabled,
   setGoalModelOverride,
   writeGoal,
 } from "../runtime/store.ts";
+import { setGoalToolActive } from "./tool-state.ts";
 
 export type GoalCommandDeps = {
   showGoalStatus: (
@@ -65,6 +68,29 @@ export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): v
     description: "Show active goal/subagent details",
     handler: async (_args, ctx) => withCommandErrors(ctx, async () => showSubagentDetails(ctx)),
   });
+  pi.registerCommand("goal_mode", {
+    description: "Enable or disable goal tool/prompt injection",
+    handler: async (args, ctx) =>
+      withCommandErrors(ctx, async () => {
+        const text = args.trim().toLowerCase();
+        const ref = goalRef(ctx);
+        if (!text || text === "status") {
+          ctx.ui.notify(`Goal mode: ${(await readGoalEnabled(ref)) ? "on" : "off"}`, "info");
+          return;
+        }
+        if (!["on", "off", "enable", "disable"].includes(text)) {
+          ctx.ui.notify("Usage: /goal_mode on|off|status", "warning");
+          return;
+        }
+        const enabled = text === "on" || text === "enable";
+        await setGoalEnabled(ref, enabled);
+        setGoalToolActive(pi, enabled);
+        if (!enabled) clearRuntimeFlags();
+        updateGoalUi(ctx, enabled ? await readGoal(ref) : null);
+        ctx.ui.notify(`Goal mode ${enabled ? "enabled" : "disabled"}`, "info");
+      }),
+  });
+
   pi.registerCommand("goal", {
     description: "Set up, inspect, pause, resume, or clear a long-running goal",
     handler: async (args, ctx) =>
@@ -82,6 +108,16 @@ export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): v
 
         if (lower === "agents") {
           await showSubagentDetails(ctx);
+          return;
+        }
+
+        if (lower === "help") {
+          ctx.ui.notify(goalHelpText(), "info");
+          return;
+        }
+
+        if (!(await readGoalEnabled(ref)) && lower !== "clear" && lower !== "cancel") {
+          ctx.ui.notify("Goal mode is disabled. Use /goal_mode on to enable it.", "warning");
           return;
         }
 
@@ -126,11 +162,6 @@ export function registerGoalCommands(pi: ExtensionAPI, deps: GoalCommandDeps): v
           await writeGoal(ref, goal);
           updateGoalUi(ctx, goal);
           ctx.ui.notify(`Dropped objective: ${removed}`, "info");
-          return;
-        }
-
-        if (lower === "help") {
-          ctx.ui.notify(goalHelpText(), "info");
           return;
         }
 

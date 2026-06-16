@@ -28,8 +28,9 @@ import {
 
 import { registerGoalTool } from "./tool.ts";
 import { compactionRecoveryInstruction, volatileGoalStatePrompt } from "../prompt/prompts.ts";
-import { goalRef, readGoal, writeGoal } from "../runtime/store.ts";
+import { goalRef, readGoal, readGoalEnabled, writeGoal } from "../runtime/store.ts";
 import { registerGoalCommands } from "./commands.ts";
+import { setGoalToolActive } from "./tool-state.ts";
 import { createGoalActions } from "./actions.ts";
 import {
   accountLiveElapsed,
@@ -74,6 +75,7 @@ export default function goalExpansion(pi: ExtensionAPI) {
   pi.on("session_compact", async (event, ctx) => {
     try {
       if (runtime.lastCompactionContinuationId === event.compactionEntry.id) return;
+      if (!(await readGoalEnabled(goalRef(ctx)))) return;
       const goal = await readGoal(goalRef(ctx));
       updateGoalUi(ctx, goal);
       if (!goal) return;
@@ -101,9 +103,11 @@ export default function goalExpansion(pi: ExtensionAPI) {
   // Session bootstrap: restore UI and optionally resume idle active goals.
   pi.on("session_start", async (event, ctx) => {
     try {
+      const enabled = await readGoalEnabled(goalRef(ctx));
+      setGoalToolActive(pi, enabled);
       const goal = await readGoal(goalRef(ctx));
-      updateGoalUi(ctx, goal);
-      if (!goal) return;
+      updateGoalUi(ctx, enabled ? goal : null);
+      if (!enabled || !goal) return;
       if (
         event.reason === "resume" &&
         goal.status === "paused" &&
@@ -138,7 +142,7 @@ export default function goalExpansion(pi: ExtensionAPI) {
   // Keep stale internal follow-up messages out of model context after state changes.
   pi.on("context", async (event, ctx) => {
     try {
-      const goal = await readGoal(goalRef(ctx));
+      const goal = (await readGoalEnabled(goalRef(ctx))) ? await readGoal(goalRef(ctx)) : null;
       return {
         messages: event.messages.filter((message) => keepGoalMessageForState(message, goal)),
       };
@@ -150,6 +154,10 @@ export default function goalExpansion(pi: ExtensionAPI) {
   // Pending setup: inject contract-clarification guidance until objectives are approved.
   pi.on("before_agent_start", async (event, ctx) => {
     try {
+      if (!(await readGoalEnabled(goalRef(ctx)))) {
+        setGoalToolActive(pi, false);
+        return;
+      }
       const goal = await readGoal(goalRef(ctx));
       if (!goal || isApprovedGoal(goal)) return;
       return {
@@ -169,7 +177,7 @@ export default function goalExpansion(pi: ExtensionAPI) {
       runtime.liveTurnTokenEstimate = 0;
       runtime.currentSubagentTokens = 0;
       runtime.currentSubagentCostUsd = 0;
-      const goal = await readGoal(goalRef(ctx));
+      const goal = (await readGoalEnabled(goalRef(ctx))) ? await readGoal(goalRef(ctx)) : null;
       if (goal?.status === "active" || (goal && !isApprovedGoal(goal)))
         runtime.activeTurnStartedAt = nowSeconds();
       else runtime.activeTurnStartedAt = null;
@@ -219,6 +227,7 @@ export default function goalExpansion(pi: ExtensionAPI) {
   pi.on("agent_end", async (event, ctx) => {
     try {
       const ref = goalRef(ctx);
+      if (!(await readGoalEnabled(ref))) return;
       let goal = await readGoal(ref);
       if (!goal) return;
 

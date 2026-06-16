@@ -10,9 +10,12 @@
 /goal expand <objective>
 /goal expand-drop <index>
 /goal clear
+/goal_mode on|off|status
 /goal_model
 /agents
 ```
+
+`/goal_mode off` removes the `goal` tool from active tools, so goal schema and guidance are not included in the model prompt. `/goal_mode on` restores it.
 
 ## Dashboard
 
