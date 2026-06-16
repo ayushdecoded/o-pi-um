@@ -19,7 +19,7 @@ export async function withBidiSession<T>(
   fn: (ctx: { baseUrl: string; bidi: BidiClient; maxChars: number; timeout: number }) => Promise<T>,
 ): Promise<T> {
   // The public tool no longer accepts browser params; backend choice comes from
-  // environment/defaults plus the deterministic "latest user said zen" override.
+  // environment/defaults plus deterministic Zen detection in the tool entrypoint.
   const kind = browserKind() === "firefox" ? "firefox" : "zen";
   const baseUrl = browserUrl(kind);
   await ensureZenRunning(baseUrl, kind);

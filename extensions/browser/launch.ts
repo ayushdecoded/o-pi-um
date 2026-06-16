@@ -84,6 +84,13 @@ export async function bidiEndpointReachable(baseUrl: string): Promise<boolean> {
   }
 }
 
+export function zenProcessRunning(): boolean {
+  const result = spawnSync("pgrep", ["-af", "zen|zen-browser|app.zen_browser.zen"], {
+    encoding: "utf8",
+  });
+  return result.status === 0 && result.stdout.trim().length > 0;
+}
+
 async function waitForEndpoint(
   baseUrl: string,
   timeoutMsValue = 7000,

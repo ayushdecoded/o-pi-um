@@ -1,10 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { captureScreenshot, runBrowserAction } from "./actions.ts";
 import { DEFAULT_BROWSER_URL, DEFAULT_ZEN_BROWSER_URL } from "./constants.ts";
-import { ensureChromeRunning, ensureZenRunning } from "./launch.ts";
+import {
+  bidiEndpointReachable,
+  ensureChromeRunning,
+  ensureZenRunning,
+  zenProcessRunning,
+} from "./launch.ts";
 import { BrowserParamsSchema } from "./schema.ts";
 import type { BrowserParams } from "./types.ts";
-import { contentText, setBrowserOverride } from "./utils.ts";
+import { browserUrl, contentText, setBrowserOverride } from "./utils.ts";
 
 function latestUserMentionsZen(ctx: { sessionManager: { getEntries(): unknown[] } }): boolean {
   // Only inspect the latest user turn so older mentions of "zen" do not stick forever.
@@ -17,13 +22,20 @@ function latestUserMentionsZen(ctx: { sessionManager: { getEntries(): unknown[] 
   return false;
 }
 
-function applyDeterministicBrowserChoice(
+async function applyDeterministicBrowserChoice(
   params: BrowserParams,
   ctx: { sessionManager: { getEntries(): unknown[] } },
-): BrowserParams {
-  // Browser choice is hidden from the tool schema. The only conversational override is
-  // the explicit word "zen" in the latest user turn; otherwise env/defaults decide.
-  setBrowserOverride(latestUserMentionsZen(ctx) ? "zen" : undefined);
+): Promise<BrowserParams> {
+  // Browser choice stays hidden from the tool schema. Env wins; otherwise prefer
+  // Zen when the user explicitly says it or already has Zen open.
+  if (process.env.PI_BROWSER) setBrowserOverride(undefined);
+  else if (
+    latestUserMentionsZen(ctx) ||
+    (await bidiEndpointReachable(browserUrl("zen"))) ||
+    zenProcessRunning()
+  )
+    setBrowserOverride("zen");
+  else setBrowserOverride(undefined);
   return params;
 }
 
@@ -69,8 +81,8 @@ export default function browserBridgeExtension(pi: ExtensionAPI): void {
       "Use action='snapshot' to inspect the page; it returns concise page state and element refs like [e12].",
       "For click/type, prefer target='e12' from snapshot over visible text. CSS escape hatch: target='css:button.submit'.",
       "For open, target is the URL. For press, target is the key. For wait, target is text. For scroll, target can be up/down.",
-      "Browser uses a dedicated Chrome profile by default and auto-starts Chrome when needed.",
-      "If the latest user message explicitly contains the word 'zen', browser automatically uses Zen/Firefox.",
+      "Browser uses a dedicated Chrome profile by default, but automatically uses Zen/Firefox when the latest user message says zen or Zen is already open.",
+      "Set PI_BROWSER=chrome|zen|firefox to force a browser backend.",
       "Do not use for sensitive account/payment/personal-data/destructive actions unless user explicitly confirms.",
     ],
     parameters: BrowserParamsSchema,
@@ -89,7 +101,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI): void {
       };
     },
     async execute(_toolCallId, params: BrowserParams, _signal, _onUpdate, ctx) {
-      params = applyDeterministicBrowserChoice(params, ctx);
+      params = await applyDeterministicBrowserChoice(params, ctx);
       try {
         // Screenshots need a multimodal result; all other actions return plain text.
         if ((params.action ?? "").toLowerCase() === "screenshot") {
