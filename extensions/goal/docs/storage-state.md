@@ -13,6 +13,7 @@ Goal state is stored per Pi thread under the session goal directory.
 - usage totals
 - subtasks
 - goal model override
+- goal mode flag
 
 ## Runtime fields
 

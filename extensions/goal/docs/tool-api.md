@@ -1,5 +1,7 @@
 # Goal tool API
 
+The `goal` tool is active by default. `/goal_mode off` removes it from active tools and removes its prompt snippet/guidelines from model context; `/goal_mode on` restores it.
+
 ## Setup
 
 ```ts

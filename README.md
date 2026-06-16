@@ -4,7 +4,7 @@ Personal Pi extension package.
 
 ## Extensions
 
-- `goal`: durable goal loop with guarded continuation, budgets, status UI, and lifecycle accounting.
+- `goal`: durable goal loop with guarded continuation, budgets, status UI, lifecycle accounting, and `/goal_mode` prompt/tool toggling.
 - `subagent`: tmux-backed child Pi sessions, parallel fan-out, follow-ups by `sessionFile`, and project model routes.
 - `compaction`: routes native Pi compaction through the `.pi/MODELS.md` `Compaction` model.
 - `footer`: compact TUI footer with context, parent usage, subagent usage, cache hit, cost, and model.
