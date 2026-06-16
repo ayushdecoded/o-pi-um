@@ -2,7 +2,7 @@
   "name": "o-pi-um",
   "version": "0.1.0",
   "private": true,
-  "description": "A Pi extension package with goal loops, subagents, compaction, browser automation, and web search.",
+  "description": "A Pi extension package with goal loops, subagents, compaction routing, browser automation, web search, and a compact footer.",
   "keywords": [
     "pi-package"
   ],

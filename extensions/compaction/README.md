@@ -1,13 +1,13 @@
 # compaction
 
-Automatic context compaction policy for Pi.
+Routed model selection for Pi compaction.
 
 ## Behavior
 
-- Checks context usage after each agent loop.
-- Triggers compaction when context usage reaches 80%.
-- Uses the `Compaction` route from `.pi/MODELS.md`.
-- Falls back to Pi's default compaction model if the route or auth is unavailable.
+- Pi owns compaction timing through native `compaction` settings.
+- This extension intercepts `session_before_compact`.
+- It runs Pi's built-in summarizer with the `.pi/MODELS.md` `Compaction` route.
+- If the route or auth is unavailable, Pi's default compaction path is used.
 
 ## Model route
 
@@ -18,12 +18,18 @@ model: provider/id
 thinking: medium
 ```
 
-The route is parsed by the subagent model-routing helpers. `thinking` is passed to Pi's built-in compaction summarizer.
+## Native trigger settings
 
-## Code layout
+Use Pi settings for when compaction runs:
 
-```text
-index.ts    threshold check, compaction hook, routed model selection
+```json
+{
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 54400,
+    "keepRecentTokens": 20000
+  }
+}
 ```
 
-The extension does not implement its own summarizer. It calls Pi's built-in `compact()` with the routed model.
+For a 272k context window, `reserveTokens: 54400` triggers around 80%.
