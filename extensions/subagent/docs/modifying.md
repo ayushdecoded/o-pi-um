@@ -72,11 +72,13 @@ Important behavior:
 
 ## Timeout behavior
 
-The parent wait timeout defaults to 300 seconds:
+The parent wait timeout defaults to 10 minutes:
 
 ```text
-PI_SUBAGENT_TIMEOUT_MS=300000
+PI_SUBAGENT_TIMEOUT_MINUTES=10
 ```
+
+Per-call `timeout` is also in minutes; `timeout: -1` disables the parent wait timeout.
 
 On timeout the tool returns failure text with:
 
@@ -187,5 +189,5 @@ subagent({ sessionFile: "...", task: "what did you say?" })
 For timeout behavior:
 
 ```text
-PI_SUBAGENT_TIMEOUT_MS=1000
+PI_SUBAGENT_TIMEOUT_MINUTES=0.1
 ```

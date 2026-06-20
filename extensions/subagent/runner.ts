@@ -5,7 +5,12 @@ import { resolveModelRoute } from "./models.ts";
 import { renderPanel, startPanel } from "./panel.ts";
 import { runPiInTmux } from "./pi-runner.ts";
 import { acquireSlot, activeRuns, releaseSlot } from "./runtime.ts";
-import type { FollowupParamsType, RunDetails, ThinkingLevelType } from "./types.ts";
+import type {
+  FollowupParamsType,
+  RunDetails,
+  SubagentTimeout,
+  ThinkingLevelType,
+} from "./types.ts";
 import {
   ensureSessionRoot,
   makeRunId,
@@ -15,9 +20,15 @@ import {
 
 export async function runParallelSubagents(
   params: {
-    tasks: Array<{ task: string; model?: string; reasoning?: ThinkingLevelType }>;
+    tasks: Array<{
+      task: string;
+      model?: string;
+      reasoning?: ThinkingLevelType;
+      timeout?: SubagentTimeout;
+    }>;
     model?: string;
     reasoning?: ThinkingLevelType;
+    timeout?: SubagentTimeout;
   },
   ctx: ExtensionContext,
   signal?: AbortSignal,
@@ -30,13 +41,22 @@ export async function runParallelSubagents(
         task.model ?? params.model,
         task.reasoning ?? params.reasoning,
       );
-      return runPiSubagent({ task: task.task, ...route }, ctx, signal);
+      return runPiSubagent(
+        { task: task.task, ...route, timeout: task.timeout ?? params.timeout },
+        ctx,
+        signal,
+      );
     }),
   );
 }
 
 export async function runPiSubagent(
-  params: { task: string; model?: string; reasoning?: ThinkingLevelType },
+  params: {
+    task: string;
+    model?: string;
+    reasoning?: ThinkingLevelType;
+    timeout?: SubagentTimeout;
+  },
   ctx: ExtensionContext,
   signal?: AbortSignal,
 ): Promise<RunDetails> {
@@ -46,6 +66,9 @@ export async function runPiSubagent(
   const startedAt = Date.now();
   const id = makeRunId("sub");
   const sessionFile = sessionFileForRun(id, startedAt);
+  const timeoutMs = subagentTimeoutMs(params.timeout);
+  if (typeof timeoutMs === "string")
+    return failedRun(params.task, params.model, sessionFile, timeoutMs, startedAt);
   return withTrackedRun(
     { id, task: params.task, model: params.model, startedAt },
     ctx,
@@ -60,7 +83,7 @@ export async function runPiSubagent(
         startedAt,
         cwd: ctx.cwd,
         depth,
-        timeoutMs: subagentTimeoutMs(),
+        timeoutMs,
         freshSessionDir: true,
         signal,
       });
@@ -88,6 +111,9 @@ export async function messageSubagentSession(
       startedAt,
     );
   const id = makeRunId("msg");
+  const timeoutMs = subagentTimeoutMs(params.timeout);
+  if (typeof timeoutMs === "string")
+    return failedRun(params.message, model, sessionFile, timeoutMs, startedAt);
   return withTrackedRun({ id, task: params.message, model, startedAt }, ctx, async () => {
     return runPiInTmux({
       id,
@@ -98,7 +124,7 @@ export async function messageSubagentSession(
       startedAt,
       cwd: ctx.cwd,
       depth: currentDepth(),
-      timeoutMs: subagentTimeoutMs(),
+      timeoutMs,
       freshSessionDir: false,
       signal,
     });
@@ -127,9 +153,18 @@ function currentDepth(): number {
   return Number(process.env.PI_SUBAGENT_DEPTH ?? "0");
 }
 
-function subagentTimeoutMs(): number {
-  const parsed = Number.parseInt(process.env.PI_SUBAGENT_TIMEOUT_MS ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300_000;
+function subagentTimeoutMs(timeoutMinutes?: SubagentTimeout): number | false | string {
+  if (timeoutMinutes !== undefined) {
+    if (timeoutMinutes === -1) return false;
+    if (Number.isFinite(timeoutMinutes) && timeoutMinutes > 0) return timeoutMinutes * 60_000;
+    return "Invalid subagent timeout: use minutes > 0, or -1 for no timeout.";
+  }
+  const envMinutes = Number.parseFloat(process.env.PI_SUBAGENT_TIMEOUT_MINUTES ?? "");
+  if (Number.isFinite(envMinutes)) {
+    if (envMinutes === -1) return false;
+    if (envMinutes > 0) return envMinutes * 60_000;
+  }
+  return 10 * 60_000;
 }
 
 function blockedRun(task: string, model?: string): RunDetails {

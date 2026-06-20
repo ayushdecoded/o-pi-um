@@ -62,7 +62,12 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
           details: { runs: [] },
         });
         const runs = await runParallelSubagents(
-          { tasks: fanout, model: options.model, reasoning: options.reasoning },
+          {
+            tasks: fanout,
+            model: options.model,
+            reasoning: options.reasoning,
+            timeout: options.timeout,
+          },
           ctx,
           signal,
         );
@@ -82,6 +87,7 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
             message: params.task,
             model: options.model,
             reasoning: options.reasoning,
+            timeout: options.timeout,
           },
           ctx,
           signal,
@@ -98,7 +104,11 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
         );
       // Solo path: one child session for one narrow task.
       const route = resolveModelRoute(ctx, options.model, options.reasoning);
-      const run = await runPiSubagent({ task: params.task, ...route }, ctx, signal);
+      const run = await runPiSubagent(
+        { task: params.task, ...route, timeout: options.timeout },
+        ctx,
+        signal,
+      );
       // Keep a small event hook for other UI/extensions; detailed output stays in the tool result/session file.
       pi.events.emit("subagent:complete", {
         id: run.id,

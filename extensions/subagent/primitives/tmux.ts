@@ -30,9 +30,9 @@ export async function waitForStatus(
   statusFile: string,
   tmuxSession: string,
   signal?: AbortSignal,
-  timeoutMs = 300_000,
+  timeoutMs: number | false = 300_000,
 ): Promise<WaitStatusResult> {
-  const deadline = Date.now() + (Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 300_000);
+  const deadline = timeoutMs === false ? Number.POSITIVE_INFINITY : Date.now() + timeoutMs;
   // The shell script writes this sentinel after Pi exits; until then tmux owns the child.
   while (!fs.existsSync(statusFile)) {
     if (signal?.aborted) {

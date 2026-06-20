@@ -10,15 +10,19 @@ const ThinkingLevel = Type.Union([
   Type.Literal("xhigh"),
 ]);
 
+const TimeoutOption = Type.Number({ description: "Timeout minutes; -1 disables." });
+
 const SubagentTask = Type.Object({
   task: Type.String({ description: "Instruction." }),
   model: Type.Optional(Type.String({ description: "Model/route." })),
   reasoning: Type.Optional(ThinkingLevel),
+  timeout: Type.Optional(TimeoutOption),
 });
 
 const SubagentOptions = Type.Object({
   model: Type.Optional(Type.String({ description: "Default model/route." })),
   reasoning: Type.Optional(ThinkingLevel),
+  timeout: Type.Optional(TimeoutOption),
 });
 
 // Model-facing API stays intentionally small: solo task, parallel tasks, or follow-up by sessionFile.

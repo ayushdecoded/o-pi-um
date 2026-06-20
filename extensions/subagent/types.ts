@@ -7,14 +7,22 @@ export type ModelRoute = {
   secondaryReasoning?: ThinkingLevelType;
 };
 
+export type SubagentTimeout = number;
+
 export type SubagentOptionsType = {
   model?: string;
   reasoning?: ThinkingLevelType;
+  timeout?: SubagentTimeout;
 };
 
 export type SubagentParamsType = {
   task?: string;
-  tasks?: Array<{ task: string; model?: string; reasoning?: ThinkingLevelType }>;
+  tasks?: Array<{
+    task: string;
+    model?: string;
+    reasoning?: ThinkingLevelType;
+    timeout?: SubagentTimeout;
+  }>;
   sessionFile?: string;
   options?: SubagentOptionsType;
 };
@@ -24,6 +32,7 @@ export type FollowupParamsType = {
   message: string;
   model?: string;
   reasoning?: ThinkingLevelType;
+  timeout?: SubagentTimeout;
 };
 
 export interface RunUsage {

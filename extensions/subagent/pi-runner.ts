@@ -19,7 +19,7 @@ export type PiRunInput = {
   startedAt: number;
   cwd: string;
   depth: number;
-  timeoutMs: number;
+  timeoutMs: number | false;
   freshSessionDir: boolean;
   signal?: AbortSignal;
 };
@@ -118,12 +118,12 @@ function runError(
   exitCode: number,
   stderr: string,
   timedOut: boolean,
-  timeoutMs: number,
+  timeoutMs: number | false,
   tmuxSession: string,
 ): string {
   if (!timedOut) return stderr || `pi exited with code ${exitCode}`;
-  const timeout = Math.ceil(timeoutMs / 1000);
-  const message = `Subagent timed out after ${timeout}s. Inspect with: tmux attach -t ${tmuxSession}`;
+  const timeout = timeoutMs === false ? "disabled" : `${Math.ceil(timeoutMs / 1000)}s`;
+  const message = `Subagent timed out after ${timeout}. Inspect with: tmux attach -t ${tmuxSession}`;
   return stderr ? `${message}\n${stderr}` : message;
 }
 

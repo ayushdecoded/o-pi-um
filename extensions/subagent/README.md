@@ -7,9 +7,9 @@ Tmux-backed Pi child sessions for delegated work.
 ```ts
 subagent({
   task?: string,
-  tasks?: Array<{ task: string; model?: string; reasoning?: string }>,
+  tasks?: Array<{ task: string; model?: string; reasoning?: string; timeout?: number }>,
   sessionFile?: string,
-  options?: { model?: string; reasoning?: string },
+  options?: { model?: string; reasoning?: string; timeout?: number },
 })
 ```
 
@@ -24,7 +24,7 @@ subagent({
 - Max active children: 10.
 - Max nesting depth: 2.
 - Results include status, output, session file, input/output token usage, and cost when available.
-- Parent wait timeout defaults to 300s; override with `PI_SUBAGENT_TIMEOUT_MS`.
+- Parent wait timeout defaults to 10 minutes; set `timeout` in minutes, `timeout: -1` to wait indefinitely, or `PI_SUBAGENT_TIMEOUT_MINUTES` globally.
 
 ## Model routes
 
