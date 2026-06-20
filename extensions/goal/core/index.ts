@@ -42,7 +42,6 @@ import {
   runtime,
   toolResponse,
 } from "./runtime.ts";
-import type { GoalState } from "../domain/types.ts";
 
 export default function goalExpansion(pi: ExtensionAPI) {
   const actions = createGoalActions(pi);
