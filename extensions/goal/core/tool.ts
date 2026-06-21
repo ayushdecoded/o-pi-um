@@ -1,21 +1,15 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { isApprovedGoal } from "../domain/state.ts";
 import type { GoalToolParams } from "../domain/types.ts";
 import { GoalToolParamsSchema } from "../params.ts";
-import { goalRef, readGoal, readGoalEnabled } from "../runtime/store.ts";
-
-export type GoalToolResult = {
-  content: Array<{ type: "text"; text: string }>;
-  details: Record<string, unknown>;
-  isError: boolean;
-};
+import { readGoalState } from "../domain/state.ts";
+import type { GoalToolResult } from "./actions.ts";
 
 export type GoalToolDeps = {
   presentGoalContract: (ctx: ExtensionContext, objective: string) => Promise<GoalToolResult>;
   updateGoalSubtasks: (
     ctx: ExtensionContext,
-    subtasks: Array<{ subtask: string; completed?: boolean }>,
+    subtasks: Array<{ subtask?: string; title?: string; completed?: boolean }>,
   ) => Promise<GoalToolResult>;
   expandGoal: (
     ctx: ExtensionContext,
@@ -24,58 +18,50 @@ export type GoalToolDeps = {
   ) => Promise<GoalToolResult>;
   completeGoal: (ctx: ExtensionContext) => Promise<GoalToolResult>;
   pauseGoalFromAgent: (ctx: ExtensionContext) => Promise<GoalToolResult>;
-  continueGoalFromAgent: (ctx: ExtensionContext) => Promise<GoalToolResult>;
   toolResponse: (text: string, isError: boolean) => GoalToolResult;
 };
 
 export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
-  const {
-    presentGoalContract,
-    updateGoalSubtasks,
-    expandGoal,
-    completeGoal,
-    pauseGoalFromAgent,
-    continueGoalFromAgent,
-    toolResponse,
-  } = deps;
   pi.registerTool({
     name: "goal",
     label: "Goal",
     description:
-      "Control a persistent long-running goal: subtask, expand, continue, pause, or complete.",
-    promptSnippet: "Use goal for long-running objective lifecycle only.",
+      "Update durable state for the active long-running goal: contract, subtasks, expansion, pause, or completion.",
+    promptSnippet: "Use goal only for durable long-running goal state changes.",
     promptGuidelines: [
-      "Use goal for long-running objective lifecycle: subtask, expand, pause, complete. Every active goal turn ends with continue, pause, or complete.",
+      "During setup, call goal(contract=<approved contract>) with no action after the user approves the contract.",
+      'During execution, use goal(action="subtask") for checklist changes, goal(action="pause") for user blockers, and goal(action="complete") only after verification.',
+      "Do not use goal to keep work going; the extension schedules slices.",
     ],
     parameters: GoalToolParamsSchema,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params: GoalToolParams, _signal, _onUpdate, ctx) {
       try {
-        if (!(await readGoalEnabled(goalRef(ctx))))
-          return toolResponse("Goal mode is disabled. Use /goal_mode on to enable it.", true);
-        const action = params.action as string | undefined;
+        const action = params.action;
         if (params.contract !== undefined) {
-          const ref = goalRef(ctx);
-          const goal = await readGoal(ref);
           if (action !== undefined)
-            return toolResponse(
+            return deps.toolResponse(
               "During setup, call goal(contract=<approved contract>) with no action.",
               true,
             );
-          if (goal && !isApprovedGoal(goal)) return presentGoalContract(ctx, params.contract);
-          return toolResponse("Goal contract can only be presented while setup is pending.", true);
+          const goal = readGoalState(ctx);
+          if (!goal || goal.status !== "setup")
+            return deps.toolResponse(
+              "Goal contract can only be presented while setup is pending.",
+              true,
+            );
+          return deps.presentGoalContract(ctx, params.contract);
         }
-        if (action === "subtask") return updateGoalSubtasks(ctx, params.subtasks ?? []);
+        if (action === "subtask") return deps.updateGoalSubtasks(ctx, params.subtasks ?? []);
         if (action === "expand")
-          return expandGoal(ctx, params.expansions?.add ?? [], params.expansions?.drop);
-        if (action === "complete") return completeGoal(ctx);
-        if (action === "pause") return pauseGoalFromAgent(ctx);
-        if (action === "continue") return continueGoalFromAgent(ctx);
-        return toolResponse(
-          "Goal tool needs action=subtask, action=expand, action=pause, action=continue, action=complete, or contract=<approved setup contract> while setup is pending.",
+          return deps.expandGoal(ctx, params.expansions?.add ?? [], params.expansions?.drop);
+        if (action === "pause") return deps.pauseGoalFromAgent(ctx);
+        if (action === "complete") return deps.completeGoal(ctx);
+        return deps.toolResponse(
+          "Goal tool needs contract=<approved setup contract> while setup is pending, or action=subtask|expand|pause|complete during execution.",
           true,
         );
       } catch (error) {
-        return toolResponse(`Goal tool failed: ${errorMessage(error)}`, true);
+        return deps.toolResponse(`Goal tool failed: ${errorMessage(error)}`, true);
       }
     },
   });

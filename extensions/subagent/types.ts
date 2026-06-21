@@ -38,6 +38,8 @@ export type FollowupParamsType = {
 export interface RunUsage {
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   tokens: number;
   costUsd: number;
 }

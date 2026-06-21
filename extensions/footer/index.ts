@@ -1,17 +1,8 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 import { formatCompactNumber, formatCost } from "../shared/format.ts";
-import {
-  addUsageTotals,
-  cacheHitRateFromUsage,
-  subagentToolResultTotals,
-  usageTotalsFromUsage,
-  type UsageTotals,
-} from "../shared/usage.ts";
-
-type FooterTotals = UsageTotals & { cacheHit?: number };
+import { cacheHitRateFromTotals, sessionUsageTotals, type UsageTotals } from "../shared/usage.ts";
 
 export default function registerFooter(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
@@ -29,7 +20,8 @@ export default function registerFooter(pi: ExtensionAPI): void {
         },
         invalidate() {},
         render(width: number): string[] {
-          const totals = sessionTotals(ctx.sessionManager.getBranch());
+          const active = sessionUsageTotals(ctx.sessionManager.getBranch());
+          const ledger = sessionUsageTotals(ctx.sessionManager.getEntries());
           const left = [
             color(theme, "muted", footerData.getGitBranch() ?? ""),
             isSubagent(ctx) ? color(theme, "dim", "[sub]") : "",
@@ -37,14 +29,11 @@ export default function registerFooter(pi: ExtensionAPI): void {
             color(
               theme,
               "dim",
-              `↑${formatCompactNumber(totals.inputTokens)} ↓${formatCompactNumber(totals.outputTokens)}`,
+              `↑${formatCompactNumber(active.inputTokens)} ↓${formatCompactNumber(active.outputTokens)}`,
             ),
-            cacheLabel(totals.cacheHit, theme),
-            color(
-              theme,
-              totals.costUsd >= 2 ? "warning" : "muted",
-              `$${formatCost(totals.costUsd)}`,
-            ),
+            cacheLabel(active, theme),
+            costLabel(active, "ctx", theme),
+            cumulativeCostLabel(active, ledger, theme),
           ]
             .filter(Boolean)
             .join(color(theme, "muted", "  "));
@@ -55,33 +44,6 @@ export default function registerFooter(pi: ExtensionAPI): void {
       };
     });
   });
-}
-
-function sessionTotals(branch: any[]): FooterTotals {
-  let totals: FooterTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
-  for (const entry of branch) totals = addEntryUsage(totals, entry);
-  return totals;
-}
-
-function addEntryUsage(totals: FooterTotals, entry: any): FooterTotals {
-  if (entry.type !== "message") return totals;
-  if (entry.message?.role === "assistant") return addAssistantUsage(totals, entry.message);
-  // Subagents are separate Pi sessions, so parent assistant usage does not include them.
-  // The subagent tool result is the durable parent-side place where child usage lives.
-  if (entry.message?.role === "toolResult" && entry.message.toolName === "subagent")
-    return {
-      ...addUsageTotals(totals, subagentToolResultTotals(entry.message)),
-      cacheHit: totals.cacheHit,
-    };
-  return totals;
-}
-
-function addAssistantUsage(totals: FooterTotals, message: AssistantMessage): FooterTotals {
-  if (!message.usage) return totals;
-  const usage = message.usage as unknown as Record<string, unknown>;
-  const next = addUsageTotals(totals, usageTotalsFromUsage(usage));
-  // Cache hit is provider/session-local; keep it parent-only instead of mixing child ratios.
-  return { ...next, cacheHit: cacheHitRateFromUsage(usage) ?? totals.cacheHit };
 }
 
 function contextLabel(ctx: any, theme: any): string {
@@ -99,12 +61,28 @@ function contextLabel(ctx: any, theme: any): string {
   return color(theme, colorName, `${pct}/${formatCompactNumber(usage.contextWindow)}`);
 }
 
-function cacheLabel(cacheHit: number | undefined, theme: any): string {
+function cacheLabel(totals: UsageTotals, theme: any): string {
+  const cacheHit = cacheHitRateFromTotals(totals);
   if (cacheHit === undefined) return "";
   const hit = Math.round(cacheHit);
   const colorName = hit >= 98 ? "success" : hit >= 92 ? "warning" : "error";
   const icon = hit >= 98 ? "●" : hit >= 92 ? "▲" : "●";
   return color(theme, colorName, `${icon} CH${hit}%`);
+}
+
+function costLabel(totals: UsageTotals, label: string, theme: any): string {
+  return color(
+    theme,
+    totals.costUsd >= 2 ? "warning" : "muted",
+    `${label}$${formatCost(totals.costUsd)}`,
+  );
+}
+
+function cumulativeCostLabel(active: UsageTotals, ledger: UsageTotals, theme: any): string {
+  // Active branch cost follows Pi tree navigation and drops after branch summaries.
+  // Ledger cost scans all persisted session entries, including abandoned detailed branches.
+  if (ledger.costUsd <= active.costUsd + 0.005) return "";
+  return costLabel(ledger, "Σ", theme);
 }
 
 function isSubagent(ctx: any): boolean {
