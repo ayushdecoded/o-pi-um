@@ -17,6 +17,7 @@ export function updateGoalUi(ctx: ExtensionContext, goal: GoalState | null): voi
   try {
     if (!ctx.hasUI) return;
     renderGoalUi(ctx, goal);
+    setDashboardActive(Boolean(goal && goal.status !== "complete"));
     if (goal && goal.status !== "complete") startStatusRefresh(ctx);
     else stopStatusRefresh();
   } catch {
@@ -76,8 +77,9 @@ function goalWidgetLines(ctx: ExtensionContext, goal: GoalState): string[] {
     `${goalMarker(goal)} ${goalVerb(goal)}${slice} · ◷ ${elapsed}`,
   );
   const work = `  ↳ ${truncate(displayWorkItem(goal), 120)}`;
+  const subagents = subagentLine();
   const checklist = goal.subtasks.length ? `  ☑ ${checklistSummaryText(goal)}` : undefined;
-  return [head, work, checklist].filter((line): line is string => Boolean(line));
+  return [head, work, subagents, checklist].filter((line): line is string => Boolean(line));
 }
 
 function displayWorkItem(goal: GoalState): string {
@@ -108,12 +110,14 @@ function goalColor(goal: GoalState): "success" | "warning" | "accent" {
 
 function startStatusRefresh(ctx: ExtensionContext): void {
   refreshCtx = ctx;
+  setDashboardActive(true);
   if (statusRefreshTimer) return;
   statusRefreshTimer = setInterval(() => {
     try {
       if (!refreshCtx?.hasUI) return;
       const goal = readGoalState(refreshCtx);
       renderGoalUi(refreshCtx, goal);
+      setDashboardActive(Boolean(goal && goal.status !== "complete"));
       if (!goal || goal.status === "complete") stopStatusRefresh();
     } catch {
       // UI refresh is best-effort.
@@ -125,6 +129,31 @@ function stopStatusRefresh(): void {
   if (statusRefreshTimer) clearInterval(statusRefreshTimer);
   statusRefreshTimer = undefined;
   refreshCtx = undefined;
+}
+
+function setDashboardActive(active: boolean): void {
+  (globalThis as { __piGoalDashboardActive?: boolean }).__piGoalDashboardActive = active;
+}
+
+function subagentLine(): string | undefined {
+  const runs = activeSubagents();
+  if (runs.length === 0) return undefined;
+  const counts = new Map<string, number>();
+  for (const run of runs) {
+    const model = run.model ?? "model?";
+    counts.set(model, (counts.get(model) ?? 0) + 1);
+  }
+  const chips = Array.from(counts, ([model, count]) => `${model}×${count}`);
+  return `  ⎇ ${runs.length} · ${truncate(chips.join(" · "), 96)}`;
+}
+
+function activeSubagents(): Array<{ model?: string }> {
+  const data = (
+    globalThis as {
+      __piGoalDashboardSubagents?: { runs?: Array<{ model?: string }> };
+    }
+  ).__piGoalDashboardSubagents;
+  return Array.isArray(data?.runs) ? data.runs : [];
 }
 
 // UI-only time accounting. This is intentionally derived from session entry
