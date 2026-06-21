@@ -1,21 +1,24 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { GOAL_STATUS_KEY } from "../domain/constants.ts";
-import { activeObjective } from "../domain/state.ts";
+import {
+  GOAL_SETUP_MESSAGE_TYPE,
+  GOAL_STATUS_KEY,
+  GOAL_WORK_ORDER_MESSAGE_TYPE,
+} from "../domain/constants.ts";
+import { activeObjective, currentWorkItem, nowSeconds, readGoalState } from "../domain/state.ts";
 import type { GoalState } from "../domain/types.ts";
-import { truncate } from "./format.ts";
+import { formatElapsed, truncate } from "./format.ts";
 import { checklistSummaryText } from "./text.ts";
+
+let statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
+let refreshCtx: ExtensionContext | undefined;
 
 export function updateGoalUi(ctx: ExtensionContext, goal: GoalState | null): void {
   try {
     if (!ctx.hasUI) return;
-    if (!goal) {
-      ctx.ui.setStatus(GOAL_STATUS_KEY, undefined);
-      ctx.ui.setWidget(GOAL_STATUS_KEY, undefined);
-      return;
-    }
-    ctx.ui.setStatus(GOAL_STATUS_KEY, statusLine(ctx, goal));
-    ctx.ui.setWidget(GOAL_STATUS_KEY, goalWidgetLines(ctx, goal), { placement: "aboveEditor" });
+    renderGoalUi(ctx, goal);
+    if (goal && goal.status !== "complete") startStatusRefresh(ctx);
+    else stopStatusRefresh();
   } catch {
     // UI is best-effort.
   }
@@ -42,38 +45,150 @@ export function goalPanelPlaintext(goal: GoalState | null): string {
     .join("\n");
 }
 
+function renderGoalUi(ctx: ExtensionContext, goal: GoalState | null): void {
+  if (!goal) {
+    ctx.ui.setStatus(GOAL_STATUS_KEY, undefined);
+    ctx.ui.setWidget(GOAL_STATUS_KEY, undefined);
+    return;
+  }
+  ctx.ui.setStatus(GOAL_STATUS_KEY, statusLine(ctx, goal));
+  ctx.ui.setWidget(GOAL_STATUS_KEY, goalWidgetLines(ctx, goal), { placement: "aboveEditor" });
+}
+
 function statusLine(ctx: ExtensionContext, goal: GoalState): string {
   const theme = ctx.ui.theme;
-  const checklist = goal.subtasks.length ? ` · ${checklistSummaryText(goal)}` : "";
-  if (goal.status === "setup")
-    return theme.fg("warning", `Goal setup: ${truncate(goal.intent, 36)}`);
-  if (goal.status === "paused") return theme.fg("warning", `Goal paused${checklist}`);
-  if (goal.status === "complete") return theme.fg("success", `Goal complete${checklist}`);
-  const slice = goal.currentSlice ? `slice ${goal.currentSlice.id}` : "ready";
-  return theme.fg("accent", `Goal active · ${slice}${checklist}`);
+  const colorName = goalColor(goal);
+  const elapsed = formatElapsed(goalElapsedSeconds(ctx, goal));
+  const work = truncate(displayWorkItem(goal), 54);
+  const slice = goal.currentSlice ? ` · slice ${goal.currentSlice.id}` : "";
+  return theme.fg(
+    colorName,
+    `${goalMarker(goal)} ${goalVerb(goal)}${slice} · ◷ ${elapsed} · ${work}`,
+  );
 }
 
 function goalWidgetLines(ctx: ExtensionContext, goal: GoalState): string[] {
   const theme = ctx.ui.theme;
-  const marker =
-    goal.status === "complete"
-      ? "✓"
-      : goal.status === "paused"
-        ? "Ⅱ"
-        : goal.status === "setup"
-          ? "◇"
-          : "●";
+  const elapsed = formatElapsed(goalElapsedSeconds(ctx, goal));
+  const slice = goal.currentSlice ? ` · slice ${goal.currentSlice.id}` : "";
   const head = theme.fg(
-    goal.status === "complete"
-      ? "success"
-      : goal.status === "paused" || goal.status === "setup"
-        ? "warning"
-        : "accent",
-    `${marker} Goal ${goal.status}${goal.currentSlice ? ` · slice ${goal.currentSlice.id}` : ""}`,
+    goalColor(goal),
+    `${goalMarker(goal)} ${goalVerb(goal)}${slice} · ◷ ${elapsed}`,
   );
-  const objective = truncate(activeObjective(goal), 120);
-  const checklist = goal.subtasks.length ? `Checklist: ${checklistSummaryText(goal)}` : undefined;
-  return [head, `  ${objective}`, checklist ? `  ${checklist}` : undefined].filter(
-    (line): line is string => Boolean(line),
+  const work = `  ↳ ${truncate(displayWorkItem(goal), 120)}`;
+  const checklist = goal.subtasks.length ? `  ☑ ${checklistSummaryText(goal)}` : undefined;
+  return [head, work, checklist].filter((line): line is string => Boolean(line));
+}
+
+function displayWorkItem(goal: GoalState): string {
+  if (goal.status === "setup") return goal.intent;
+  if (goal.status === "complete") return activeObjective(goal);
+  return currentWorkItem(goal);
+}
+
+function goalMarker(goal: GoalState): string {
+  if (goal.status === "complete") return "✓";
+  if (goal.status === "paused") return "Ⅱ";
+  if (goal.status === "setup") return "◇";
+  return "●";
+}
+
+function goalVerb(goal: GoalState): string {
+  if (goal.status === "complete") return "Done";
+  if (goal.status === "paused") return "Paused";
+  if (goal.status === "setup") return "Setup";
+  return "Working";
+}
+
+function goalColor(goal: GoalState): "success" | "warning" | "accent" {
+  if (goal.status === "complete") return "success";
+  if (goal.status === "paused" || goal.status === "setup") return "warning";
+  return "accent";
+}
+
+function startStatusRefresh(ctx: ExtensionContext): void {
+  refreshCtx = ctx;
+  if (statusRefreshTimer) return;
+  statusRefreshTimer = setInterval(() => {
+    try {
+      if (!refreshCtx?.hasUI) return;
+      const goal = readGoalState(refreshCtx);
+      renderGoalUi(refreshCtx, goal);
+      if (!goal || goal.status === "complete") stopStatusRefresh();
+    } catch {
+      // UI refresh is best-effort.
+    }
+  }, 1000);
+}
+
+function stopStatusRefresh(): void {
+  if (statusRefreshTimer) clearInterval(statusRefreshTimer);
+  statusRefreshTimer = undefined;
+  refreshCtx = undefined;
+}
+
+// UI-only time accounting. This is intentionally derived from session entry
+// timestamps and never written into GoalState, prompts, tool results, or branch
+// summaries visible to the model.
+function goalElapsedSeconds(ctx: ExtensionContext, goal: GoalState): number {
+  const entries = ctx.sessionManager.getEntries();
+  let total = 0;
+  let startedAt: number | null = null;
+  let lastAssistantAt: number | null = null;
+
+  const closeTurn = () => {
+    if (startedAt === null) return;
+    if (lastAssistantAt !== null) total += Math.max(0, lastAssistantAt - startedAt);
+    else if (!ctx.isIdle()) total += Math.max(0, nowSeconds() - startedAt);
+    startedAt = null;
+    lastAssistantAt = null;
+  };
+
+  for (const entry of entries) {
+    if (isGoalTurnStart(entry, goal.id)) {
+      closeTurn();
+      startedAt = entrySeconds(entry);
+      lastAssistantAt = null;
+      continue;
+    }
+    if (startedAt !== null && isAssistantEntry(entry)) lastAssistantAt = entrySeconds(entry);
+  }
+
+  closeTurn();
+  return total;
+}
+
+function isGoalTurnStart(entry: unknown, goalId: string): boolean {
+  const item = entry as {
+    type?: unknown;
+    customType?: unknown;
+    details?: { goalId?: unknown };
+  };
+  return (
+    item.type === "custom_message" &&
+    (item.customType === GOAL_SETUP_MESSAGE_TYPE ||
+      item.customType === GOAL_WORK_ORDER_MESSAGE_TYPE) &&
+    item.details?.goalId === goalId
   );
+}
+
+function isAssistantEntry(entry: unknown): boolean {
+  const item = entry as { type?: unknown; message?: { role?: unknown } };
+  return item.type === "message" && item.message?.role === "assistant";
+}
+
+function entrySeconds(entry: unknown): number {
+  const item = entry as { timestamp?: unknown; message?: { timestamp?: unknown } };
+  return timestampSeconds(item.timestamp ?? item.message?.timestamp) ?? nowSeconds();
+}
+
+function timestampSeconds(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
+  }
+  if (typeof value === "string") {
+    const ms = Date.parse(value);
+    if (Number.isFinite(ms)) return Math.floor(ms / 1000);
+  }
+  return null;
 }

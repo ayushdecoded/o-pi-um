@@ -85,6 +85,14 @@ export function activeObjective(goal: GoalState): string {
   return objectives.at(-1) ?? goal.contract ?? goal.intent;
 }
 
+export function currentWorkItem(goal: GoalState): string {
+  const tasks = sliceSubtasks(goal, goal.currentSlice?.id).filter((item) => !item.completed);
+  const specific = tasks.find(
+    (item) => item.title.toLowerCase() !== "complete and verify this slice",
+  );
+  return specific?.title ?? goal.currentSlice?.objective ?? activeObjective(goal);
+}
+
 export function touchGoal(goal: GoalState): void {
   goal.updatedAt = nowSeconds();
 }
