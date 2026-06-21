@@ -32,8 +32,8 @@ export default function registerFooter(pi: ExtensionAPI): void {
               `↑${formatCompactNumber(active.inputTokens)} ↓${formatCompactNumber(active.outputTokens)}`,
             ),
             cacheLabel(active, theme),
-            costLabel(active, "ctx", theme),
-            cumulativeCostLabel(active, ledger, theme),
+            activeCostLabel(active, theme),
+            ledgerCostLabel(active, ledger, theme),
           ]
             .filter(Boolean)
             .join(color(theme, "muted", "  "));
@@ -67,22 +67,25 @@ function cacheLabel(totals: UsageTotals, theme: any): string {
   const hit = Math.round(cacheHit);
   const colorName = hit >= 98 ? "success" : hit >= 92 ? "warning" : "error";
   const icon = hit >= 98 ? "●" : hit >= 92 ? "▲" : "●";
-  return color(theme, colorName, `${icon} CH${hit}%`);
+  return color(theme, colorName, `${icon}${hit}%`);
 }
 
-function costLabel(totals: UsageTotals, label: string, theme: any): string {
+function activeCostLabel(totals: UsageTotals, theme: any): string {
+  return costLabel(totals, "↳", theme);
+}
+
+function ledgerCostLabel(active: UsageTotals, ledger: UsageTotals, theme: any): string {
+  // ↳ follows the active tree branch; ◆ scans the whole persisted session ledger.
+  if (ledger.costUsd <= active.costUsd + 0.005) return "";
+  return costLabel(ledger, "◆", theme);
+}
+
+function costLabel(totals: UsageTotals, icon: string, theme: any): string {
   return color(
     theme,
     totals.costUsd >= 2 ? "warning" : "muted",
-    `${label}$${formatCost(totals.costUsd)}`,
+    `${icon}$${formatCost(totals.costUsd)}`,
   );
-}
-
-function cumulativeCostLabel(active: UsageTotals, ledger: UsageTotals, theme: any): string {
-  // Active branch cost follows Pi tree navigation and drops after branch summaries.
-  // Ledger cost scans all persisted session entries, including abandoned detailed branches.
-  if (ledger.costUsd <= active.costUsd + 0.005) return "";
-  return costLabel(ledger, "Σ", theme);
 }
 
 function isSubagent(ctx: any): boolean {
