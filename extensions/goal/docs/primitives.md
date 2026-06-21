@@ -1,28 +1,17 @@
-# Primitives
+# Goal primitives
 
-## Objective
+The implementation intentionally uses Pi-native primitives:
 
-An approved contract item. The model works one objective at a time.
+- session custom entries: durable branch-local goal snapshots
+- hidden custom messages: setup and slice work orders
+- command context: temporary access to `waitForIdle()` and `navigateTree()`
+- slice-scoped subtasks: deterministic settlement, seeded by the controller and capped at 7 per slice
+- branch summaries: slice rollups
+- labels: readable `/tree` anchors
 
-## Subtask
+Usage/cost accounting must distinguish active branch from cumulative ledger:
 
-A checklist item scoped to an objective index.
+- `ctx.sessionManager.getBranch()` follows the current tree leaf and matches active context/footer semantics after rollups.
+- `ctx.sessionManager.getEntries()` scans all persisted entries, including abandoned detailed slice branches, and is closer to cumulative spend.
 
-## Expansion
-
-Additional objectives appended to the objective list.
-
-## Blocker
-
-A deterministic pause reason:
-
-- `waiting_on_user`
-- `budget_limited`
-
-## Budget
-
-Optional limits for tokens, elapsed time, turns, and cost.
-
-## Continuation
-
-A queued follow-up that wakes the assistant for the next loop turn.
+When Pi exposes branch summarization to normal extension contexts, the same primitives can move from command-controller orchestration to an `agent_end` runner.

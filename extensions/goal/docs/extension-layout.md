@@ -1,33 +1,12 @@
-# Extension layout
+# Goal extension layout
 
-```text
-core/
-  index.ts      hooks and registration
-  commands.ts   slash commands
-  actions.ts    goal action handlers
-  runtime.ts    process-local loop state
-  tool.ts       model-facing tool
+- `core/index.ts` wires the tool, commands, and lightweight hooks.
+- `core/controller.ts` runs the command-context slice loop.
+- `core/actions.ts` implements model tool mutations.
+- `core/commands.ts` implements `/goal` and `/agents`.
+- `domain/state.ts` reconstructs and appends branch-local goal snapshots.
+- `domain/types.ts` defines the lean goal/slice state.
+- `prompt/prompts.ts` contains setup, frame, work-order, and summary prompts.
+- `ui/*` contains minimal approval/status helpers.
 
-domain/
-  constants.ts
-  intent.ts
-  state.ts
-  types.ts
-
-runtime/
-  analysis.ts   usage, budget, message analysis
-  store.ts      durable goal state
-
-prompt/
-  prompts.ts
-
-ui/
-  dashboard.ts
-  overlays.ts
-  status.ts
-  statusline.ts
-  text.ts
-  format.ts
-```
-
-Model routing and subagent execution live in `extensions/subagent`.
+Deleted by design: sidecar store, continuation runtime, budget accounting, goal mode/model toggles.

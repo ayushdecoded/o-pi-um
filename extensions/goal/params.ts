@@ -1,11 +1,10 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-// Model-facing goal API: small lifecycle surface. Setup is inferred by objective while no objective is approved.
 export const GoalToolParamsSchema = Type.Object({
   action: Type.Optional(
-    StringEnum(["complete", "subtask", "expand", "pause", "continue"] as const, {
-      description: "Goal action.",
+    StringEnum(["complete", "subtask", "expand", "pause"] as const, {
+      description: "Durable goal state action.",
     }),
   ),
   contract: Type.Optional(
@@ -19,7 +18,7 @@ export const GoalToolParamsSchema = Type.Object({
         subtask: Type.String({ description: "Title." }),
         completed: Type.Optional(Type.Boolean({ description: "Done?" })),
       }),
-      { description: "Batch subtask updates for current objective." },
+      { description: "Batch subtask updates." },
     ),
   ),
   expansions: Type.Optional(
@@ -29,13 +28,3 @@ export const GoalToolParamsSchema = Type.Object({
     }),
   ),
 });
-
-export function normalizeBoolean(value: unknown): boolean | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    if (/^(true|yes|1|done|complete|completed)$/i.test(value.trim())) return true;
-    if (/^(false|no|0|open|todo|incomplete)$/i.test(value.trim())) return false;
-  }
-  return Boolean(value);
-}

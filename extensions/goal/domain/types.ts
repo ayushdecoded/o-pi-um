@@ -1,79 +1,61 @@
-// Stored lifecycle state. Setup is intentionally not a status: `objectives.length === 0` means setup.
-export type GoalStatus = "active" | "paused" | "complete";
-
-// Only deterministic blockers are stored. User ambiguity comes from the model; budgets come from extension enforcement.
-export type GoalBlockedReason = "waiting_on_user" | "budget_limited" | null;
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-
-export type GoalModelOverride = {
-  model: string;
-  thinking?: ThinkingLevel;
-};
+export type GoalStatus = "setup" | "active" | "paused" | "complete";
+export type GoalBlockedReason = "waiting_on_user" | null;
 
 export type GoalSubtask = {
   id: string;
   title: string;
   completed: boolean;
-  // Subtasks are scoped to one objective. Expansions are just appended objectives.
-  objectiveIndex: number;
-  createdAt: number; // epoch seconds; internal ordering/audit only
-  updatedAt: number; // epoch seconds; internal ordering/audit only
+  sliceId?: number;
+  createdAt: number;
+  updatedAt: number;
 };
 
-export type GoalMetrics = {
-  toolCalls: number;
-  continuationsStarted: number;
-  budgetLimits: number;
-};
-
-export type GoalSubTurn = {
-  // Per-continuation accounting. This replaces a separate "last turn" summary.
-  index: number;
-  tokens: number;
-  tools: number;
-  durationSeconds: number;
+export type GoalSlice = {
+  id: number;
+  objective: string;
+  startedAt: number;
+  startEntryId?: string;
 };
 
 export type GoalState = {
   id: string;
-  threadId: string;
-  intent: string; // raw user request before clarification/approval
-  objectives: string[]; // approved objective list; empty means setup/approval is still pending
-  currentObjectiveIndex: number; // objective currently shown to/handled by the model
+  intent: string;
+  contract?: string;
+  objectives: string[];
   status: GoalStatus;
-  tokenBudget: number | null;
-  timeBudgetSeconds?: number | null;
-  turnBudget?: number | null;
-  costBudgetUsd?: number | null;
-  tokensUsed: number;
-  timeUsedSeconds: number;
-  turnsUsed?: number;
-  costUsedUsd?: number;
-  createdAt: number; // epoch seconds; internal ordering/audit only
-  updatedAt: number; // epoch seconds; internal ordering/audit only
+  createdAt: number;
+  updatedAt: number;
   activatedAt?: number;
-  subTurns?: GoalSubTurn[];
   completedAt?: number;
   blockedReason?: GoalBlockedReason;
   blockedDetail?: string;
-  subtasks?: GoalSubtask[];
-  metrics?: GoalMetrics;
-  budgetLimitPrompted?: boolean;
-  modelOverride?: GoalModelOverride;
+  subtasks: GoalSubtask[];
+  sliceCounter: number;
+  currentSlice?: GoalSlice;
+  lastSummaryEntryId?: string;
 };
 
-export type GoalFile = {
+export type GoalEventName =
+  | "created"
+  | "contract-approved"
+  | "subtasks-updated"
+  | "expanded"
+  | "paused"
+  | "resumed"
+  | "completed"
+  | "slice-start"
+  | "slice-rolled-up"
+  | "cleared";
+
+export type GoalEntryData = {
   version: 1;
-  goal: GoalState | null;
-  modelOverride?: GoalModelOverride;
-  goalEnabled?: boolean;
+  event: GoalEventName;
+  goal?: GoalState;
 };
 
 export type GoalToolParams = {
-  action?: "complete" | "subtask" | "expand" | "pause" | "continue";
+  action?: "complete" | "subtask" | "expand" | "pause";
   contract?: string;
   subtasks?: Array<{ subtask?: string; title?: string; completed?: boolean }>;
   expansions?: { add?: string[]; drop?: number };
-  subtask?: string;
-  completed?: boolean;
 };

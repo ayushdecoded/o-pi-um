@@ -1,29 +1,20 @@
 # Goal tool API
 
-The `goal` tool is active by default. `/goal_mode off` removes it from active tools and removes its prompt snippet/guidelines from model context; `/goal_mode on` restores it.
+The model-facing `goal` tool only mutates durable goal state.
 
-## Setup
-
-```ts
-goal({ contract: string });
-```
-
-Only valid while no contract has been approved.
-
-## Actions
+Setup:
 
 ```ts
-goal({ action: "subtask", subtasks: Array<{ subtask: string; completed?: boolean }> })
-goal({ action: "expand", expansions: { add?: string[]; drop?: number } })
-goal({ action: "pause" })
-goal({ action: "continue" })
-goal({ action: "complete" })
+goal({ contract: "approved contract text" });
 ```
 
-## Rules
+Execution:
 
-- `contract` is setup-only and cannot be mixed with `action`.
-- `complete` is blocked until current-objective subtasks are complete.
-- `expand.add` appends objectives.
-- `expand.drop` removes an objective by index; index `0` is protected.
-- `continue` queues the next loop turn without changing scope.
+```ts
+goal({ action: "subtask", subtasks: [{ subtask: "Run tests", completed: true }] });
+goal({ action: "expand", expansions: { add: ["Follow-up objective"] } });
+goal({ action: "pause" });
+goal({ action: "complete" });
+```
+
+There is no `continue` action. Slice scheduling is owned by the extension controller.

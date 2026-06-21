@@ -1,32 +1,67 @@
 # Goal lifecycle
 
-A goal is a guarded loop around one approved contract.
+The goal extension is a lean Pi-tree slice runner.
 
-## Setup
+## State
 
-`/goal <intent>` creates paused state with no objectives. The assistant discusses scope and calls:
+Goal state lives in session custom entries of type `pi-goal-state`.
 
-```ts
-goal({ contract: "approved contract" });
+These entries do not enter LLM context. The active goal is reconstructed by scanning the current session branch and taking the latest goal snapshot. There is no sidecar JSON store.
+
+Important events:
+
+- `created`
+- `contract-approved`
+- `subtasks-updated`
+- `expanded`
+- `paused`
+- `resumed`
+- `completed`
+- `slice-start`
+- `slice-rolled-up`
+- `cleared`
+
+## Flow
+
+```text
+/goal <intent>
+  -> append created snapshot
+  -> send hidden setup message
+  -> model calls goal(contract=...)
+  -> user approves contract
+  -> append contract-approved snapshot
+  -> start slice
+  -> send hidden work-order message
+  -> wait for idle
+  -> controller seeds one slice subtask
+  -> controller checks current slice subtasks
+  -> if slice subtasks are all done, navigateTree(sliceStartId, { summarize: true })
+  -> Pi appends branch_summary under slice-start
+  -> append slice-rolled-up snapshot under the summary leaf
+  -> repeat until paused/complete
 ```
 
-The contract becomes objective `0`, the goal becomes active, and continuation begins.
+Tree shape after a slice:
 
-## Active loop
-
-Each continuation receives only the active objective, checklist, blockers, and budget pressure. The assistant updates progress with:
-
-```ts
-goal({ action: "subtask", subtasks: [{ subtask: "...", completed: true }] });
-goal({ action: "expand", expansions: { add: ["..."] } });
-goal({ action: "pause" });
-goal({ action: "complete" });
+```text
+goal-slice-start
+  ├── detailed work branch
+  │   └── assistant/tool/goal updates
+  └── branch_summary
+      └── goal slice-rolled-up snapshot   ← active branch
 ```
 
-## Pause and resume
+## Current workaround
 
-Paused goals keep durable state. `/goal resume` clears blockers and queues the next continuation when the UI is idle.
+Pi currently exposes branch summarization through command context, so `/goal` and `/goal resume` run the controller. The controller uses:
 
-## Completion
+- `pi.appendEntry(...)` for durable state snapshots
+- `ctx.sessionManager.getLeafId()` to recover the ID after append
+- `pi.sendMessage(..., { triggerTurn: true })` for hidden setup/work-order turns
+- `ctx.waitForIdle()` to wait for each agent turn
+- current-slice subtasks, capped at 7, as deterministic slice settlement
+- `ctx.navigateTree(sliceStartId, { summarize: true })` to roll up finished slices
 
-Completion requires all active-objective subtasks to be done. The extension records final usage and stops continuation.
+## Future Pi API swap
+
+When Pi exposes branch summarization to normal extension hooks, move slice rollup from the command controller to `agent_end` and keep the same state model.
