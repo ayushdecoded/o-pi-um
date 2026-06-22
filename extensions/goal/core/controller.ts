@@ -14,7 +14,7 @@ import {
 } from "../domain/state.ts";
 import type { GoalState } from "../domain/types.ts";
 import { setupPrompt, sliceSummaryInstructions, sliceWorkOrderPrompt } from "../prompt/prompts.ts";
-import { updateGoalUi } from "../ui/status.ts";
+import { setGoalUiPhase, updateGoalUi } from "../ui/status.ts";
 
 let runningGoalId: string | null = null;
 
@@ -35,6 +35,7 @@ export async function runGoalController(
   try {
     await runControllerUnlocked(pi, ctx);
   } finally {
+    setGoalUiPhase(initial.id);
     runningGoalId = null;
   }
 }
@@ -62,16 +63,23 @@ async function runControllerUnlocked(
     }
 
     if (goal.status === "complete") {
+      setGoalUiPhase(goal.id);
       ctx.ui.notify("Goal complete", "info");
       return;
     }
     if (goal.status === "paused" || goal.blockedReason) {
+      setGoalUiPhase(goal.id);
       ctx.ui.notify("Goal paused. Resume with /goal resume.", "warning");
       return;
     }
     if (!isApprovedActiveGoal(goal)) return;
 
     goal = ensureSliceStarted(pi, ctx, goal);
+    if (shouldRollUpSlice(goal)) {
+      await rollUpSlice(pi, ctx, goal);
+      continue;
+    }
+
     const beforeFingerprint = sliceFingerprint(goal);
     await runSliceTurn(pi, ctx, goal);
 
@@ -124,6 +132,7 @@ function ensureSliceStarted(
   ]);
   const entryId = appendGoalState(pi, ctx, "slice-start", goal);
   goal.currentSlice.startEntryId = entryId;
+  setGoalUiPhase(goal.id);
   setGoalLabel(pi, entryId, `goal:${shortId(goal.id)}:slice:${goal.currentSlice.id}:start`);
   updateGoalUi(ctx, goal);
   return goal;
@@ -179,12 +188,20 @@ async function rollUpSlice(
   if (!slice?.startEntryId) return goal;
 
   const label = `goal:${shortId(goal.id)}:slice:${slice.id}:summary`;
+  setGoalUiPhase(
+    goal.id,
+    `↻ slice ${slice.id}${goal.status === "active" ? `→${slice.id + 1}` : ""}`,
+    "summarizing",
+  );
+  updateGoalUi(ctx, goal);
   const result = await ctx.navigateTree(slice.startEntryId, {
     summarize: true,
     customInstructions: sliceSummaryInstructions(goal),
     label,
   });
+  await waitForAgentToStop(ctx);
   if (result.cancelled) {
+    setGoalUiPhase(goal.id);
     goal.status = "paused";
     goal.blockedReason = "waiting_on_user";
     goal.blockedDetail = "Slice rollup was cancelled.";
@@ -200,6 +217,11 @@ async function rollUpSlice(
   goal.currentSlice = undefined;
   touchGoal(goal);
   appendGoalState(pi, ctx, "slice-rolled-up", goal);
+  if (goal.status === "active") {
+    setGoalUiPhase(goal.id, `→ slice ${slice.id + 1}`, "starting");
+  } else {
+    setGoalUiPhase(goal.id);
+  }
   updateGoalUi(ctx, goal);
   return goal;
 }
@@ -211,7 +233,11 @@ async function sendHiddenTurn(
   content: string,
   details: Record<string, unknown>,
 ): Promise<void> {
-  pi.sendMessage({ customType, content, display: false, details }, { triggerTurn: true });
+  if (!ctx.isIdle() || ctx.hasPendingMessages()) await waitForAgentToStop(ctx);
+  pi.sendMessage(
+    { customType, content, display: false, details },
+    { triggerTurn: true, deliverAs: "followUp" },
+  );
   if (await waitForAgentToStart(ctx)) await waitForAgentToStop(ctx);
 }
 

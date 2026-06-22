@@ -10,8 +10,15 @@ import type { GoalState } from "../domain/types.ts";
 import { formatElapsed, truncate } from "./format.ts";
 import { checklistSummaryText } from "./text.ts";
 
+type GoalUiPhase = { goalId: string; title: string; detail: string };
+
 let statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let refreshCtx: ExtensionContext | undefined;
+let activePhase: GoalUiPhase | null = null;
+
+export function setGoalUiPhase(goalId: string, title?: string, detail?: string): void {
+  activePhase = title && detail ? { goalId, title, detail } : null;
+}
 
 export function updateGoalUi(ctx: ExtensionContext, goal: GoalState | null): void {
   try {
@@ -58,27 +65,25 @@ function renderGoalUi(ctx: ExtensionContext, goal: GoalState | null): void {
 
 function statusLine(ctx: ExtensionContext, goal: GoalState): string {
   const theme = ctx.ui.theme;
-  const colorName = goalColor(goal);
+  const phase = phaseFor(goal);
+  const colorName = phase ? "accent" : goalColor(goal);
   const elapsed = formatElapsed(goalElapsedSeconds(ctx, goal));
-  const work = truncate(displayWorkItem(goal), 54);
-  const slice = goal.currentSlice ? ` · slice ${goal.currentSlice.id}` : "";
-  return theme.fg(
-    colorName,
-    `${goalMarker(goal)} ${goalVerb(goal)}${slice} · ◷ ${elapsed} · ${work}`,
-  );
+  const work = truncate(phase?.detail ?? displayWorkItem(goal), 54);
+  return theme.fg(colorName, `${phase?.title ?? goalTitle(goal)} · ◷ ${elapsed} · ${work}`);
 }
 
 function goalWidgetLines(ctx: ExtensionContext, goal: GoalState): string[] {
   const theme = ctx.ui.theme;
   const elapsed = formatElapsed(goalElapsedSeconds(ctx, goal));
-  const slice = goal.currentSlice ? ` · slice ${goal.currentSlice.id}` : "";
-  const head = theme.fg(
-    goalColor(goal),
-    `${goalMarker(goal)} ${goalVerb(goal)}${slice} · ◷ ${elapsed}`,
-  );
-  const work = `  ↳ ${truncate(displayWorkItem(goal), 120)}`;
+  const phase = phaseFor(goal);
+  const title = phase?.title ?? goalTitle(goal);
+  const head = theme.fg(phase ? "accent" : goalColor(goal), `${title} · ◷ ${elapsed}`);
+  const work = `  ↳ ${truncate(phase?.detail ?? displayWorkItem(goal), 120)}`;
   const subagents = subagentLine();
-  const checklist = goal.subtasks.length ? `  ☑ ${checklistSummaryText(goal)}` : undefined;
+  const checklistIcon = phase ? "✓" : "☑";
+  const checklist = goal.subtasks.length
+    ? `  ${checklistIcon} ${checklistSummaryText(goal)}`
+    : undefined;
   return [head, work, subagents, checklist].filter((line): line is string => Boolean(line));
 }
 
@@ -86,6 +91,15 @@ function displayWorkItem(goal: GoalState): string {
   if (goal.status === "setup") return goal.intent;
   if (goal.status === "complete") return activeObjective(goal);
   return currentWorkItem(goal);
+}
+
+function phaseFor(goal: GoalState): GoalUiPhase | null {
+  return activePhase?.goalId === goal.id ? activePhase : null;
+}
+
+function goalTitle(goal: GoalState): string {
+  const slice = goal.currentSlice ? ` · slice ${goal.currentSlice.id}` : "";
+  return `${goalMarker(goal)} ${goalVerb(goal)}${slice}`;
 }
 
 function goalMarker(goal: GoalState): string {
