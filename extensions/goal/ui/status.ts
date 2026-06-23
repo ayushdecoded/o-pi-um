@@ -1,14 +1,21 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
+  GOAL_ROLLUP_MESSAGE_TYPE,
   GOAL_SETUP_MESSAGE_TYPE,
   GOAL_STATUS_KEY,
   GOAL_WORK_ORDER_MESSAGE_TYPE,
 } from "../domain/constants.ts";
-import { activeObjective, currentWorkItem, nowSeconds, readGoalState } from "../domain/state.ts";
+import {
+  activeObjective,
+  currentTasks,
+  currentWorkItem,
+  nowSeconds,
+  readGoalState,
+} from "../domain/state.ts";
 import type { GoalState } from "../domain/types.ts";
 import { formatElapsed, truncate } from "./format.ts";
-import { checklistSummaryText } from "./text.ts";
+import { taskSummaryText } from "./text.ts";
 
 type GoalUiPhase = { goalId: string; title: string; detail: string };
 
@@ -37,17 +44,20 @@ export async function showGoalStatus(ctx: ExtensionContext, goal: GoalState | nu
 }
 
 export function goalPanelPlaintext(goal: GoalState | null): string {
-  if (!goal) return "No active goal. Start one with /goal <intent>.";
+  if (!goal) return "No active Goal. Start one with /goal <intent>.";
+  const tasks = currentTasks(goal);
   return [
     `Goal: ${goal.status}`,
     `Intent: ${goal.intent}`,
     goal.contract ? `Contract: ${goal.contract}` : undefined,
     `Objective: ${activeObjective(goal)}`,
-    goal.currentSlice ? `Current slice: ${goal.currentSlice.id}` : undefined,
+    goal.currentSlice
+      ? `Current slice: s${goal.currentSlice.id} ${goal.currentSlice.name}`
+      : undefined,
     goal.lastSummaryEntryId ? `Last summary: ${goal.lastSummaryEntryId}` : undefined,
     goal.blockedDetail ? `Blocked: ${goal.blockedDetail}` : undefined,
-    goal.subtasks.length ? `Checklist: ${checklistSummaryText(goal)}` : "Checklist: none yet",
-    ...goal.subtasks.map((item) => `- ${item.completed ? "[x]" : "[ ]"} ${item.title}`),
+    tasks.length ? taskSummaryText(goal) : "Tasks: none yet",
+    ...tasks.map((item) => `- ${item.completed ? "[x]" : "[ ]"} ${item.name}`),
   ]
     .filter(Boolean)
     .join("\n");
@@ -80,11 +90,9 @@ function goalWidgetLines(ctx: ExtensionContext, goal: GoalState): string[] {
   const head = theme.fg(phase ? "accent" : goalColor(goal), `${title} · ◷ ${elapsed}`);
   const work = `  ↳ ${truncate(phase?.detail ?? displayWorkItem(goal), 120)}`;
   const subagents = subagentLine();
-  const checklistIcon = phase ? "✓" : "☑";
-  const checklist = goal.subtasks.length
-    ? `  ${checklistIcon} ${checklistSummaryText(goal)}`
-    : undefined;
-  return [head, work, subagents, checklist].filter((line): line is string => Boolean(line));
+  const tasks = currentTasks(goal);
+  const taskLine = tasks.length ? `  ${phase ? "✓" : "☑"} ${taskSummaryText(goal)}` : undefined;
+  return [head, work, subagents, taskLine].filter((line): line is string => Boolean(line));
 }
 
 function displayWorkItem(goal: GoalState): string {
@@ -98,7 +106,7 @@ function phaseFor(goal: GoalState): GoalUiPhase | null {
 }
 
 function goalTitle(goal: GoalState): string {
-  const slice = goal.currentSlice ? ` · slice ${goal.currentSlice.id}` : "";
+  const slice = goal.currentSlice ? ` · s${goal.currentSlice.id} ${goal.currentSlice.name}` : "";
   return `${goalMarker(goal)} ${goalVerb(goal)}${slice}`;
 }
 
@@ -170,9 +178,8 @@ function activeSubagents(): Array<{ model?: string }> {
   return Array.isArray(data?.runs) ? data.runs : [];
 }
 
-// UI-only time accounting. This is intentionally derived from session entry
-// timestamps and never written into GoalState, prompts, tool results, or branch
-// summaries visible to the model.
+// UI-only time accounting. This is intentionally derived from visible goal turn
+// timestamps and never written into model-visible task state.
 function goalElapsedSeconds(ctx: ExtensionContext, goal: GoalState): number {
   const entries = ctx.sessionManager.getEntries();
   let total = 0;
@@ -194,7 +201,7 @@ function goalElapsedSeconds(ctx: ExtensionContext, goal: GoalState): number {
       lastAssistantAt = null;
       continue;
     }
-    if (startedAt !== null && isAssistantEntry(entry)) lastAssistantAt = entrySeconds(entry);
+    if (startedAt !== null && isTurnCompletionEntry(entry)) lastAssistantAt = entrySeconds(entry);
   }
 
   closeTurn();
@@ -210,14 +217,18 @@ function isGoalTurnStart(entry: unknown, goalId: string): boolean {
   return (
     item.type === "custom_message" &&
     (item.customType === GOAL_SETUP_MESSAGE_TYPE ||
-      item.customType === GOAL_WORK_ORDER_MESSAGE_TYPE) &&
+      item.customType === GOAL_WORK_ORDER_MESSAGE_TYPE ||
+      item.customType === GOAL_ROLLUP_MESSAGE_TYPE) &&
     item.details?.goalId === goalId
   );
 }
 
-function isAssistantEntry(entry: unknown): boolean {
+function isTurnCompletionEntry(entry: unknown): boolean {
   const item = entry as { type?: unknown; message?: { role?: unknown } };
-  return item.type === "message" && item.message?.role === "assistant";
+  return (
+    (item.type === "message" && item.message?.role === "assistant") ||
+    item.type === "branch_summary"
+  );
 }
 
 function entrySeconds(entry: unknown): number {

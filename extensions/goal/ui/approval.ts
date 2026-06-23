@@ -13,7 +13,7 @@ export function goalContractPreviewLines(
 ): string[] {
   const theme = ctx.ui.theme;
   return [
-    theme.fg("warning", "◇ Activate goal contract?") +
+    theme.fg("warning", "◇ Activate Goal contract?") +
       theme.fg("dim", " · enter selects Yes, esc cancels"),
     theme.fg("dim", `  Intent: ${truncate(goal.intent, 100)}`),
     ...previewLines(objective, 3).map((line, index) =>
@@ -108,7 +108,7 @@ export async function approveGoalContract(
 
 function goalContractMarkdown(goal: GoalState, objective: string): string {
   return [
-    "**Approve only if this matches what you want the autonomous goal runner to do.**",
+    "**Approve only if this matches what you want the autonomous Goal runner to do.**",
     "",
     "## Contract",
     objective,

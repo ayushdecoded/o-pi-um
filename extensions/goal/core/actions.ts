@@ -3,26 +3,25 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   GOAL_STATUS_KEY,
   HEADLESS_AUTO_APPROVE_ENV,
-  MAX_SLICE_SUBTASKS,
+  MAX_SLICE_TASKS,
 } from "../domain/constants.ts";
 import { validateObjective } from "../domain/intent.ts";
 import {
-  activeObjective,
   appendGoalState,
-  applySubtaskUpdates,
-  incompleteSubtasks,
-  sliceSubtasks,
+  applyTaskUpdates,
+  currentTasks,
+  incompleteTasks,
   isApprovedActiveGoal,
   isApprovedGoal,
-  normalizedObjectives,
   nowSeconds,
   readGoalState,
+  setGoalLabel,
   touchGoal,
 } from "../domain/state.ts";
-import type { GoalState } from "../domain/types.ts";
+import type { GoalTaskUpdate } from "../domain/types.ts";
 import { approveGoalContract, goalContractPreviewLines } from "../ui/approval.ts";
 import { updateGoalUi } from "../ui/status.ts";
-import { checklistSummaryText, formatGoalForTool, formatSubtaskUpdate } from "../ui/text.ts";
+import { formatGoalForTool, formatTaskUpdate, taskSummaryText } from "../ui/text.ts";
 
 export type GoalToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -38,7 +37,7 @@ export function createGoalActions(pi: ExtensionAPI) {
 
     const goal = readGoalState(ctx);
     if (!goal || goal.status !== "setup")
-      return toolResponse("No goal setup is active. Start with /goal <intent>.", true);
+      return toolResponse("No Goal setup is active. Start with /goal <intent>.", true);
 
     let approved = headlessAutoApproveEnabled();
     if (ctx.hasUI) {
@@ -59,7 +58,6 @@ export function createGoalActions(pi: ExtensionAPI) {
     }
 
     goal.contract = objective;
-    goal.objectives = [objective];
     goal.status = "active";
     goal.activatedAt = nowSeconds();
     goal.blockedReason = null;
@@ -71,93 +69,93 @@ export function createGoalActions(pi: ExtensionAPI) {
     return toolResponse(formatGoalForTool(goal), false);
   }
 
-  async function updateGoalSubtasks(
+  async function updateGoalTasks(
     ctx: ExtensionContext,
-    updatesRaw: Array<{ subtask?: string; title?: string; completed?: boolean }>,
+    sliceRaw: { name?: string; objective?: string } | undefined,
+    updatesRaw: GoalTaskUpdate[],
   ) {
     const goal = readGoalState(ctx);
     if (!goal || !isApprovedActiveGoal(goal))
-      return toolResponse("No active goal to update subtasks for.", true);
+      return toolResponse("No active Goal to update tasks for.", true);
+    if (!goal.currentSlice) return toolResponse("No current goal slice is active.", true);
 
-    const updates = updatesRaw
-      .map((item) => ({
-        title: (item.subtask ?? item.title ?? "").trim(),
-        completed: item.completed ?? false,
-      }))
-      .filter((item) => item.title.length > 0);
-    if (updates.length === 0)
-      return toolResponse("At least one subtask title must be non-empty.", true);
-
-    const sliceId = goal.currentSlice?.id;
-    const currentTitles = new Set(
-      sliceSubtasks(goal, sliceId).map((item) => item.title.toLowerCase()),
-    );
-    const addedToSlice = new Set(
-      updates.map((item) => item.title.toLowerCase()).filter((title) => !currentTitles.has(title)),
-    );
-    if (currentTitles.size + addedToSlice.size > MAX_SLICE_SUBTASKS) {
-      return toolResponse(
-        `Each goal slice can track at most ${MAX_SLICE_SUBTASKS} subtasks. Update existing slice subtasks or wait for the next slice.`,
-        true,
-      );
+    let sliceChanged = false;
+    const name = sliceRaw?.name?.trim();
+    const objective = sliceRaw?.objective?.trim();
+    if (name && name !== goal.currentSlice.name) {
+      goal.currentSlice.name = name;
+      sliceChanged = true;
+    }
+    if (objective && objective !== goal.currentSlice.objective) {
+      goal.currentSlice.objective = objective;
+      sliceChanged = true;
     }
 
-    const changed = applySubtaskUpdates(goal, sliceId, updates);
-    appendGoalState(pi, ctx, "subtasks-updated", goal);
-    updateGoalUi(ctx, goal);
-    return toolResponse(
-      updates.length === 1
-        ? formatSubtaskUpdate(goal, updates[0]!.title, updates[0]!.completed)
-        : `Updated ${updates.length} goal subtasks:\n${changed.join("\n")}\n\nChecklist: ${checklistSummaryText(goal)}`,
-      false,
+    const updates = updatesRaw.flatMap((item): GoalTaskUpdate[] => {
+      const name = item.name?.trim();
+      if (!name) return [];
+      return [
+        {
+          name,
+          objective: item.objective?.trim(),
+          verification: item.verification?.trim(),
+          completed: item.completed,
+          evidence: item.evidence?.trim(),
+        },
+      ];
+    });
+
+    if (updates.length === 0 && !sliceChanged)
+      return toolResponse("Provide slice.name/objective or at least one task update.", true);
+
+    const existingNames = new Set(currentTasks(goal).map((item) => item.name.toLowerCase()));
+    const newNames = new Set(
+      updates.map((item) => item.name!.toLowerCase()).filter((item) => !existingNames.has(item)),
     );
-  }
-
-  async function expandGoal(ctx: ExtensionContext, objectives: string[], drop?: number) {
-    const goal = readGoalState(ctx);
-    if (!goal || !isApprovedActiveGoal(goal))
-      return toolResponse("No approved active goal to expand.", true);
-
-    goal.objectives = normalizedObjectives(goal);
-    const lines: string[] = [];
-    if (drop !== undefined) {
-      if (drop <= 0 || drop >= goal.objectives.length)
+    if (existingNames.size + newNames.size > MAX_SLICE_TASKS) {
+      return toolResponse(`Each goal slice can track at most ${MAX_SLICE_TASKS} tasks.`, true);
+    }
+    for (const update of updates) {
+      if (
+        !existingNames.has(update.name!.toLowerCase()) &&
+        (!update.objective || !update.verification)
+      ) {
         return toolResponse(
-          `Invalid objective index ${drop}. Index 0 is the base contract and cannot be dropped.`,
+          `New task "${update.name}" needs objective and verification fields.`,
           true,
         );
-      const removed = goal.objectives.splice(drop, 1)[0]!;
-      lines.push(`Dropped objective: ${removed}`);
+      }
     }
-    for (const objective of objectives.map((item) => item.trim()).filter(Boolean)) {
-      goal.objectives.push(objective);
-      lines.push(`○ Objective added: ${objective}`);
-    }
-    if (lines.length === 0)
-      return toolResponse("No changes: provide expansions.add or expansions.drop.", true);
 
+    const changed = applyTaskUpdates(goal, updates);
+    if (sliceChanged)
+      setGoalLabel(
+        pi,
+        goal.currentSlice.startEntryId,
+        startLabel(goal.currentSlice.id, goal.currentSlice.name),
+      );
     touchGoal(goal);
-    appendGoalState(pi, ctx, "expanded", goal);
+    appendGoalState(pi, ctx, "tasks-updated", goal);
     updateGoalUi(ctx, goal);
-    return toolResponse(`${lines.join("\n")}\n\nActive objective: ${activeObjective(goal)}`, false);
+    return toolResponse(formatTaskUpdate(goal, changed, sliceChanged), false);
   }
 
   async function completeGoal(ctx: ExtensionContext) {
     const goal = readGoalState(ctx);
     if (!goal || !isApprovedActiveGoal(goal))
-      return toolResponse("No active goal to complete.", true);
+      return toolResponse("No active Goal to complete.", true);
 
-    const currentSliceTasks = goal.currentSlice ? sliceSubtasks(goal, goal.currentSlice.id) : [];
-    if (goal.currentSlice && currentSliceTasks.length === 0)
+    const tasks = currentTasks(goal);
+    if (goal.currentSlice && tasks.length === 0)
       return toolResponse(
-        "Track and complete at least one subtask for the current slice before completing the goal.",
+        "Track and complete at least one task for the current slice before completing the goal.",
         true,
       );
 
-    const incomplete = incompleteSubtasks(goal);
+    const incomplete = incompleteTasks(goal);
     if (incomplete.length > 0)
       return toolResponse(
-        `Cannot complete goal while subtasks remain incomplete:\n${incomplete.map((item) => `- ${item.title}`).join("\n")}`,
+        `Cannot complete goal while current-slice tasks remain incomplete:\n${incomplete.map((item) => `- ${item.name}`).join("\n")}`,
         true,
       );
 
@@ -174,7 +172,7 @@ export function createGoalActions(pi: ExtensionAPI) {
   async function pauseGoalFromAgent(ctx: ExtensionContext) {
     const goal = readGoalState(ctx);
     if (!goal || !isApprovedGoal(goal) || goal.status !== "active")
-      return toolResponse("No active goal to pause.", true);
+      return toolResponse("No active Goal to pause.", true);
 
     goal.status = "paused";
     goal.blockedReason = "waiting_on_user";
@@ -183,16 +181,12 @@ export function createGoalActions(pi: ExtensionAPI) {
     touchGoal(goal);
     appendGoalState(pi, ctx, "paused", goal);
     updateGoalUi(ctx, goal);
-    return toolResponse(
-      `Goal paused. Resume with /goal resume.\n${formatGoalForTool(goal)}`,
-      false,
-    );
+    return toolResponse(`Goal paused. Resume with /goal resume.\n${taskSummaryText(goal)}`, false);
   }
 
   return {
     presentGoalContract,
-    updateGoalSubtasks,
-    expandGoal,
+    updateGoalTasks,
     completeGoal,
     pauseGoalFromAgent,
   };
@@ -200,6 +194,18 @@ export function createGoalActions(pi: ExtensionAPI) {
 
 export function toolResponse(text: string, isError: boolean): GoalToolResult {
   return { content: [{ type: "text", text }], details: {}, isError };
+}
+
+function startLabel(id: number, name: string): string {
+  return `● s${String(id).padStart(2, "0")} · ${slug(name)}`;
+}
+
+function slug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
 function headlessAutoApproveEnabled(): boolean {

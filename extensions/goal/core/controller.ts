@@ -1,19 +1,28 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-import { GOAL_SETUP_MESSAGE_TYPE, GOAL_WORK_ORDER_MESSAGE_TYPE } from "../domain/constants.ts";
+import {
+  GOAL_ROLLUP_MESSAGE_TYPE,
+  GOAL_SETUP_MESSAGE_TYPE,
+  GOAL_WORK_ORDER_MESSAGE_TYPE,
+} from "../domain/constants.ts";
 import {
   activeObjective,
   appendGoalState,
-  applySubtaskUpdates,
+  createDefaultSliceTask,
+  currentTasks,
   isApprovedActiveGoal,
   nowSeconds,
   readGoalState,
   setGoalLabel,
-  sliceSubtasks,
   touchGoal,
 } from "../domain/state.ts";
 import type { GoalState } from "../domain/types.ts";
-import { setupPrompt, sliceSummaryInstructions, sliceWorkOrderPrompt } from "../prompt/prompts.ts";
+import {
+  setupPrompt,
+  sliceLabel,
+  sliceSummaryInstructions,
+  sliceWorkOrderPrompt,
+} from "../prompt/prompts.ts";
 import { setGoalUiPhase, updateGoalUi } from "../ui/status.ts";
 
 let runningGoalId: string | null = null;
@@ -24,11 +33,11 @@ export async function runGoalController(
 ): Promise<void> {
   const initial = readGoalState(ctx);
   if (!initial) {
-    ctx.ui.notify("No goal to run. Start one with /goal <intent>.", "warning");
+    ctx.ui.notify("No active Goal. Start one with /goal <intent>.", "warning");
     return;
   }
   if (runningGoalId) {
-    ctx.ui.notify("A goal controller is already running.", "warning");
+    ctx.ui.notify("Goal controller is already running.", "warning");
     return;
   }
   runningGoalId = initial.id;
@@ -90,13 +99,12 @@ async function runControllerUnlocked(
       continue;
     }
     if (afterTurn.status === "active" && !afterTurn.blockedReason) {
-      const currentTasks = sliceSubtasks(afterTurn, afterTurn.currentSlice?.id);
-      if (currentTasks.length === 0) {
-        pauseGoal(pi, ctx, afterTurn, "Slice produced no tracked subtasks.");
+      if (currentTasks(afterTurn).length === 0) {
+        pauseGoal(pi, ctx, afterTurn, "Slice produced no tracked tasks.");
         return;
       }
       if (sliceFingerprint(afterTurn) === beforeFingerprint) {
-        pauseGoal(pi, ctx, afterTurn, "Slice made no durable checklist progress.");
+        pauseGoal(pi, ctx, afterTurn, "Slice made no durable task progress.");
         return;
       }
     }
@@ -108,9 +116,11 @@ async function runSetupTurn(
   ctx: ExtensionCommandContext,
   goal: GoalState,
 ): Promise<void> {
-  await sendHiddenTurn(pi, ctx, GOAL_SETUP_MESSAGE_TYPE, setupPrompt(goal), {
+  await sendVisibleTurn(pi, ctx, GOAL_SETUP_MESSAGE_TYPE, setupPrompt(goal), {
     goalId: goal.id,
     phase: "setup",
+    title: "◇ Setup",
+    detail: goal.intent,
   });
 }
 
@@ -124,16 +134,15 @@ function ensureSliceStarted(
   goal.sliceCounter += 1;
   goal.currentSlice = {
     id: goal.sliceCounter,
+    name: `Slice ${goal.sliceCounter}`,
     objective: activeObjective(goal),
     startedAt: nowSeconds(),
+    tasks: [createDefaultSliceTask(activeObjective(goal))],
   };
-  applySubtaskUpdates(goal, goal.currentSlice.id, [
-    { title: "Complete and verify this slice", completed: false },
-  ]);
   const entryId = appendGoalState(pi, ctx, "slice-start", goal);
   goal.currentSlice.startEntryId = entryId;
   setGoalUiPhase(goal.id);
-  setGoalLabel(pi, entryId, `goal:${shortId(goal.id)}:slice:${goal.currentSlice.id}:start`);
+  setGoalLabel(pi, entryId, sliceTreeLabel(goal, "start"));
   updateGoalUi(ctx, goal);
   return goal;
 }
@@ -143,17 +152,20 @@ async function runSliceTurn(
   ctx: ExtensionCommandContext,
   goal: GoalState,
 ): Promise<void> {
-  await sendHiddenTurn(pi, ctx, GOAL_WORK_ORDER_MESSAGE_TYPE, sliceWorkOrderPrompt(goal), {
+  const slice = goal.currentSlice;
+  await sendVisibleTurn(pi, ctx, GOAL_WORK_ORDER_MESSAGE_TYPE, sliceWorkOrderPrompt(goal), {
     goalId: goal.id,
-    sliceId: goal.currentSlice?.id,
-    phase: "work",
+    phase: "slice",
+    sliceId: slice?.id,
+    title: `● ${sliceLabel(goal)}`,
+    detail: slice?.objective ?? activeObjective(goal),
   });
 }
 
 function shouldRollUpSlice(goal: GoalState): boolean {
   if (!goal.currentSlice?.startEntryId) return false;
   if (goal.status === "paused" || goal.status === "complete" || goal.blockedReason) return true;
-  const tasks = sliceSubtasks(goal, goal.currentSlice.id);
+  const tasks = currentTasks(goal);
   return tasks.length > 0 && tasks.every((task) => task.completed);
 }
 
@@ -173,8 +185,11 @@ function pauseGoal(
 }
 
 function sliceFingerprint(goal: GoalState): string {
-  return sliceSubtasks(goal, goal.currentSlice?.id)
-    .map((task) => `${task.completed ? "1" : "0"}:${task.title.toLowerCase()}`)
+  return currentTasks(goal)
+    .map(
+      (task) =>
+        `${task.completed ? "1" : "0"}:${task.name.toLowerCase()}:${task.objective}:${task.verification}:${task.evidence ?? ""}`,
+    )
     .sort()
     .join("\n");
 }
@@ -187,17 +202,28 @@ async function rollUpSlice(
   const slice = goal.currentSlice;
   if (!slice?.startEntryId) return goal;
 
-  const label = `goal:${shortId(goal.id)}:slice:${slice.id}:summary`;
   setGoalUiPhase(
     goal.id,
-    `↻ slice ${slice.id}${goal.status === "active" ? `→${slice.id + 1}` : ""}`,
+    `↻ s${slice.id}${goal.status === "active" ? `→${slice.id + 1}` : ""}`,
     "summarizing",
   );
   updateGoalUi(ctx, goal);
+  pi.sendMessage({
+    customType: GOAL_ROLLUP_MESSAGE_TYPE,
+    content: `Rolling up ${sliceLabel(goal)} into a branch summary before moving to the next slice.`,
+    display: true,
+    details: {
+      goalId: goal.id,
+      phase: "rollup",
+      sliceId: slice.id,
+      title: `↻ s${slice.id}${goal.status === "active" ? `→${slice.id + 1}` : ""}`,
+      detail: "summarizing",
+    },
+  });
   const result = await ctx.navigateTree(slice.startEntryId, {
     summarize: true,
     customInstructions: sliceSummaryInstructions(goal),
-    label,
+    label: sliceTreeLabel(goal, "done"),
   });
   await waitForAgentToStop(ctx);
   if (result.cancelled) {
@@ -214,19 +240,17 @@ async function rollUpSlice(
   const summaryEntryId =
     summaryEntryIdFromNavigateResult(result) ?? ctx.sessionManager.getLeafId() ?? undefined;
   goal.lastSummaryEntryId = summaryEntryId;
+  goal.completedSlices += 1;
   goal.currentSlice = undefined;
   touchGoal(goal);
   appendGoalState(pi, ctx, "slice-rolled-up", goal);
-  if (goal.status === "active") {
-    setGoalUiPhase(goal.id, `→ slice ${slice.id + 1}`, "starting");
-  } else {
-    setGoalUiPhase(goal.id);
-  }
+  if (goal.status === "active") setGoalUiPhase(goal.id, `→ s${slice.id + 1}`, "starting");
+  else setGoalUiPhase(goal.id);
   updateGoalUi(ctx, goal);
   return goal;
 }
 
-async function sendHiddenTurn(
+async function sendVisibleTurn(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   customType: string,
@@ -235,7 +259,7 @@ async function sendHiddenTurn(
 ): Promise<void> {
   if (!ctx.isIdle() || ctx.hasPendingMessages()) await waitForAgentToStop(ctx);
   pi.sendMessage(
-    { customType, content, display: false, details },
+    { customType, content, display: true, details },
     { triggerTurn: true, deliverAs: "followUp" },
   );
   if (await waitForAgentToStart(ctx)) await waitForAgentToStop(ctx);
@@ -246,8 +270,20 @@ function summaryEntryIdFromNavigateResult(result: { cancelled: boolean }): strin
   return typeof summaryEntry?.id === "string" ? summaryEntry.id : undefined;
 }
 
-function shortId(id: string): string {
-  return id.slice(0, 8);
+function sliceTreeLabel(goal: GoalState, suffix: "start" | "done"): string {
+  const slice = goal.currentSlice;
+  const status = suffix === "done" ? "✓" : "●";
+  const id = slice ? `s${String(slice.id).padStart(2, "0")}` : "s??";
+  const name = slug(slice?.name ?? "slice");
+  return `${status} ${id} · ${name}`;
+}
+
+function slug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
 async function waitForAgentToStart(ctx: ExtensionCommandContext): Promise<boolean> {

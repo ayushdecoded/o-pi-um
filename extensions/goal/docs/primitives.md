@@ -2,12 +2,12 @@
 
 The implementation intentionally uses Pi-native primitives:
 
-- session custom entries: durable branch-local goal snapshots
-- hidden custom messages: setup and slice work orders
+- session custom entries: durable branch-local goal snapshots, not sent to the model
+- visible custom messages: setup and slice work orders, rendered compactly but auditable/expandable
 - command context: temporary access to `waitForIdle()` and `navigateTree()`
-- slice-scoped subtasks: deterministic settlement, seeded by the controller and capped at 7 per slice
+- current-slice tasks: `name`, `objective`, `verification`, optional completion `evidence`, capped at 7
 - branch summaries: slice rollups
-- labels: readable `/tree` anchors
+- labels/session names: readable `/tree` anchors
 
 Usage/cost accounting must distinguish active branch from cumulative ledger:
 

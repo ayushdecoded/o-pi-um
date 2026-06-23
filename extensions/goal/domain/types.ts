@@ -1,27 +1,30 @@
 export type GoalStatus = "setup" | "active" | "paused" | "complete";
 export type GoalBlockedReason = "waiting_on_user" | null;
 
-export type GoalSubtask = {
+export type GoalTask = {
   id: string;
-  title: string;
+  name: string;
+  objective: string;
+  verification: string;
   completed: boolean;
-  sliceId?: number;
+  evidence?: string;
   createdAt: number;
   updatedAt: number;
 };
 
 export type GoalSlice = {
   id: number;
+  name: string;
   objective: string;
   startedAt: number;
   startEntryId?: string;
+  tasks: GoalTask[];
 };
 
 export type GoalState = {
   id: string;
   intent: string;
   contract?: string;
-  objectives: string[];
   status: GoalStatus;
   createdAt: number;
   updatedAt: number;
@@ -29,8 +32,8 @@ export type GoalState = {
   completedAt?: number;
   blockedReason?: GoalBlockedReason;
   blockedDetail?: string;
-  subtasks: GoalSubtask[];
   sliceCounter: number;
+  completedSlices: number;
   currentSlice?: GoalSlice;
   lastSummaryEntryId?: string;
 };
@@ -38,8 +41,7 @@ export type GoalState = {
 export type GoalEventName =
   | "created"
   | "contract-approved"
-  | "subtasks-updated"
-  | "expanded"
+  | "tasks-updated"
   | "paused"
   | "resumed"
   | "completed"
@@ -53,9 +55,17 @@ export type GoalEntryData = {
   goal?: GoalState;
 };
 
+export type GoalTaskUpdate = {
+  name?: string;
+  objective?: string;
+  verification?: string;
+  completed?: boolean;
+  evidence?: string;
+};
+
 export type GoalToolParams = {
-  action?: "complete" | "subtask" | "expand" | "pause";
+  action?: "complete" | "tasks" | "pause";
   contract?: string;
-  subtasks?: Array<{ subtask?: string; title?: string; completed?: boolean }>;
-  expansions?: { add?: string[]; drop?: number };
+  slice?: { name?: string; objective?: string };
+  tasks?: GoalTaskUpdate[];
 };

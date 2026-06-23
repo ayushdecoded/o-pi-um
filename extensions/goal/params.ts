@@ -3,7 +3,7 @@ import { Type } from "typebox";
 
 export const GoalToolParamsSchema = Type.Object({
   action: Type.Optional(
-    StringEnum(["complete", "subtask", "expand", "pause"] as const, {
+    StringEnum(["complete", "tasks", "pause"] as const, {
       description: "Durable goal state action.",
     }),
   ),
@@ -12,19 +12,22 @@ export const GoalToolParamsSchema = Type.Object({
       description: "Approved setup contract. Use only while setup is pending, with no action.",
     }),
   ),
-  subtasks: Type.Optional(
+  slice: Type.Optional(
+    Type.Object({
+      name: Type.Optional(Type.String({ description: "Short current-slice name." })),
+      objective: Type.Optional(Type.String({ description: "Current-slice objective." })),
+    }),
+  ),
+  tasks: Type.Optional(
     Type.Array(
       Type.Object({
-        subtask: Type.String({ description: "Title." }),
+        name: Type.String({ description: "Short task name." }),
+        objective: Type.Optional(Type.String({ description: "What this task produces." })),
+        verification: Type.Optional(Type.String({ description: "How to verify this task." })),
         completed: Type.Optional(Type.Boolean({ description: "Done?" })),
+        evidence: Type.Optional(Type.String({ description: "Proof/evidence when done." })),
       }),
-      { description: "Batch subtask updates." },
+      { description: "Current-slice task updates. New tasks need objective and verification." },
     ),
-  ),
-  expansions: Type.Optional(
-    Type.Object({
-      add: Type.Optional(Type.Array(Type.String({ description: "Add objective." }))),
-      drop: Type.Optional(Type.Number({ description: "Drop objective index." })),
-    }),
   ),
 });
