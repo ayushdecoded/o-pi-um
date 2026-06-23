@@ -16,7 +16,7 @@ import {
 } from "../domain/state.ts";
 import { goalHelpText, showSubagentDetails } from "../ui/overlays.ts";
 import { showGoalStatus, updateGoalUi } from "../ui/status.ts";
-import { runGoalController } from "./controller.ts";
+import { goalTurnInProgressReason, runGoalController } from "./controller.ts";
 
 export function registerGoalCommands(pi: ExtensionAPI): void {
   pi.registerCommand("agents", {
@@ -72,6 +72,14 @@ async function handleGoalCommand(
     }
     if (goal.status === "complete") {
       ctx.ui.notify("Goal is already complete.", "info");
+      return;
+    }
+    const inProgress = goalTurnInProgressReason(ctx);
+    if (inProgress) {
+      ctx.ui.notify(
+        `Goal resume skipped: ${inProgress}. Continue/wait for that turn first.`,
+        "warning",
+      );
       return;
     }
     if (isApprovedGoal(goal) && goal.status !== "active") {

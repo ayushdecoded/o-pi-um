@@ -1,11 +1,14 @@
-import { MAX_PLANNED_SLICES, MAX_SLICE_TASKS } from "../domain/constants.ts";
+import { MAX_SLICE_TASKS } from "../domain/constants.ts";
 import { activeObjective, currentTasks } from "../domain/state.ts";
 import type { GoalState, GoalTask } from "../domain/types.ts";
 
 export function setupPrompt(goal: GoalState): string {
   return [
-    "Goal setup. Ask only for missing success criteria, validation, boundaries, or ask-before rules.",
-    `No implementation. After user approval call goal({contract}) only. Limit: ${MAX_SLICE_TASKS} tasks/slice.`,
+    "Goal setup. Build shared understanding before approval; no implementation.",
+    "Use existing session context and codebase evidence first; do not re-ask already-resolved points.",
+    "Interview relentlessly on unresolved plan branches/dependencies; ask exactly one question at a time and include your recommended answer.",
+    "If codebase exploration can answer a question, explore instead of asking.",
+    `After approval call goal({contract,slices}) once; do no implementation. Then reply with one short handoff line only. Slices are ordered; each has short name,tasks≤${MAX_SLICE_TASKS}.`,
     "",
     `<untrusted_intent>\n${escapeXml(goal.intent)}\n</untrusted_intent>`,
   ].join("\n");
@@ -15,8 +18,8 @@ export function sliceWorkOrderPrompt(goal: GoalState): string {
   const slice = goal.currentSlice;
   return [
     `Goal slice: ${sliceLabel(goal)}.`,
-    `One coherent milestone only. State via goal({action:"tasks"}): slice?, tasks≤${MAX_SLICE_TASKS}, slices≤${MAX_PLANNED_SLICES}.`,
-    "Task fields: name, objective, verification; add evidence when completed.",
+    `One coherent milestone only. State via goal({action:"tasks"}): slice?, tasks≤${MAX_SLICE_TASKS}.`,
+    "Task fields: name, objective, verification; add concise evidence when completed.",
     "Review/fix/validate before final task. Pause if blocked. Complete only after full-contract verification.",
     "",
     `<contract>\n${escapeXml(goal.contract ?? goal.intent)}\n</contract>`,
@@ -28,12 +31,11 @@ export function sliceWorkOrderPrompt(goal: GoalState): string {
     .join("\n");
 }
 
-export function sliceSummaryInstructions(goal: GoalState): string {
-  const slice = goal.currentSlice;
+export function sliceSummaryInstructions(_goal: GoalState): string {
   return [
-    `Summarize Goal slice ${sliceLabel(goal)} for continuation.`,
-    "Keep: objective, completed tasks, evidence/validation, files changed/read, blockers, next slice name/objective.",
-    "Be compact; omit boilerplate.",
+    "Compact this work segment for continuation.",
+    "Keep: durable requirements, completed work/evidence, validation, important files/APIs/commands, decisions, next work, blockers.",
+    "Omit dialogue, tool chatter, transient plans, repeated instructions, and Goal/slice/branch/controller wording. No preamble.",
   ].join("\n");
 }
 
@@ -49,7 +51,8 @@ function formatPlannedSlices(goal: GoalState): string {
     "",
     "Queued slices:",
     ...goal.plannedSlices.map(
-      (slice) => `- ${escapeXml(slice.name)}: ${escapeXml(slice.objective)}`,
+      (slice) =>
+        `- ${escapeXml(slice.name)}${slice.objective ? `: ${escapeXml(slice.objective)}` : ""}`,
     ),
   ].join("\n");
 }

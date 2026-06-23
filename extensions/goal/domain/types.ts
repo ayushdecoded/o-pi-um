@@ -21,9 +21,16 @@ export type GoalSlice = {
   tasks: GoalTask[];
 };
 
-export type GoalSlicePlan = {
+export type GoalTaskPlan = {
   name: string;
   objective: string;
+  verification: string;
+};
+
+export type GoalSlicePlan = {
+  name: string;
+  objective?: string;
+  tasks?: GoalTaskPlan[];
 };
 
 export type GoalState = {
@@ -41,6 +48,7 @@ export type GoalState = {
   completedSlices: number;
   plannedSlices: GoalSlicePlan[];
   currentSlice?: GoalSlice;
+  completeAfterCurrentSlice?: boolean;
   lastSummaryEntryId?: string;
 };
 
@@ -48,6 +56,7 @@ export type GoalEventName =
   | "created"
   | "contract-approved"
   | "tasks-updated"
+  | "completion-requested"
   | "paused"
   | "resumed"
   | "completed"

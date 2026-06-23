@@ -9,7 +9,7 @@ export const GoalToolParamsSchema = Type.Object({
   ),
   contract: Type.Optional(
     Type.String({
-      description: "Approved setup contract; no action.",
+      description: "Approved setup contract; no action. Include ordered slices when known.",
     }),
   ),
   slice: Type.Optional(
@@ -21,10 +21,19 @@ export const GoalToolParamsSchema = Type.Object({
   slices: Type.Optional(
     Type.Array(
       Type.Object({
-        name: Type.String({ description: "Future slice name." }),
-        objective: Type.String({ description: "Future slice objective." }),
+        name: Type.String({ description: "Slice name." }),
+        objective: Type.Optional(Type.String({ description: "Slice objective." })),
+        tasks: Type.Optional(
+          Type.Array(
+            Type.Object({
+              name: Type.String({ description: "Task name." }),
+              objective: Type.String({ description: "Task output." }),
+              verification: Type.String({ description: "Done when..." }),
+            }),
+          ),
+        ),
       }),
-      { description: "Queued future slice plans." },
+      { description: "Ordered setup slice plan." },
     ),
   ),
   tasks: Type.Optional(
