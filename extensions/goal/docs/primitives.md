@@ -6,6 +6,7 @@ The implementation intentionally uses Pi-native primitives:
 - visible custom messages: setup and slice work orders, rendered compactly but auditable/expandable
 - command context: temporary access to `waitForIdle()` and `navigateTree()`
 - current-slice tasks: `name`, `objective`, `verification`, optional completion `evidence`, capped at 7
+- queued future slice plans: `name`, `objective`, consumed one at a time by the controller
 - branch summaries: slice rollups
 - labels/session names: readable `/tree` anchors
 

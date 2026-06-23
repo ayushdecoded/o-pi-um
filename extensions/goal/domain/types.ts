@@ -21,6 +21,11 @@ export type GoalSlice = {
   tasks: GoalTask[];
 };
 
+export type GoalSlicePlan = {
+  name: string;
+  objective: string;
+};
+
 export type GoalState = {
   id: string;
   intent: string;
@@ -34,6 +39,7 @@ export type GoalState = {
   blockedDetail?: string;
   sliceCounter: number;
   completedSlices: number;
+  plannedSlices: GoalSlicePlan[];
   currentSlice?: GoalSlice;
   lastSummaryEntryId?: string;
 };
@@ -67,5 +73,6 @@ export type GoalToolParams = {
   action?: "complete" | "tasks" | "pause";
   contract?: string;
   slice?: { name?: string; objective?: string };
+  slices?: GoalSlicePlan[];
   tasks?: GoalTaskUpdate[];
 };

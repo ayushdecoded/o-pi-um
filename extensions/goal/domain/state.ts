@@ -3,7 +3,14 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 
 import { GOAL_STATE_ENTRY_TYPE } from "./constants.ts";
-import type { GoalEntryData, GoalEventName, GoalState, GoalTask, GoalTaskUpdate } from "./types.ts";
+import type {
+  GoalEntryData,
+  GoalEventName,
+  GoalSlicePlan,
+  GoalState,
+  GoalTask,
+  GoalTaskUpdate,
+} from "./types.ts";
 
 const DEFAULT_SLICE_TASK = "Complete and verify slice";
 
@@ -18,6 +25,7 @@ export function createGoal(intent: string): GoalState {
     blockedReason: null,
     sliceCounter: 0,
     completedSlices: 0,
+    plannedSlices: [],
   };
 }
 
@@ -77,7 +85,9 @@ export function isApprovedActiveGoal(goal: GoalState): boolean {
 }
 
 export function activeObjective(goal: GoalState): string {
-  return goal.currentSlice?.objective || goal.contract || goal.intent;
+  return (
+    goal.currentSlice?.objective || goal.plannedSlices[0]?.objective || goal.contract || goal.intent
+  );
 }
 
 export function currentWorkItem(goal: GoalState): string {
@@ -93,6 +103,27 @@ export function currentTasks(goal: GoalState): GoalTask[] {
 
 export function incompleteTasks(goal: GoalState): GoalTask[] {
   return currentTasks(goal).filter((item) => !item.completed);
+}
+
+export function applySlicePlans(goal: GoalState, plans: GoalSlicePlan[]): string[] {
+  const changed: string[] = [];
+  for (const plan of plans) {
+    const name = plan.name.trim();
+    const objective = plan.objective.trim();
+    if (!name || !objective) continue;
+    const existing = goal.plannedSlices.find(
+      (item) => item.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (existing) existing.objective = objective;
+    else goal.plannedSlices.push({ name, objective });
+    changed.push(`→ ${name}`);
+  }
+  touchGoal(goal);
+  return changed;
+}
+
+export function takeNextSlicePlan(goal: GoalState): GoalSlicePlan | undefined {
+  return goal.plannedSlices.shift();
 }
 
 export function createDefaultSliceTask(objective: string): GoalTask {
@@ -151,7 +182,7 @@ export function nowSeconds(): number {
 }
 
 export function cloneGoal(goal: GoalState): GoalState {
-  return JSON.parse(JSON.stringify(goal)) as GoalState;
+  return normalizeGoal(JSON.parse(JSON.stringify(goal)) as Partial<GoalState>);
 }
 
 function createTask(input: {
@@ -180,7 +211,7 @@ function goalEntryData(entry: SessionEntry): GoalEntryData | null {
   if (!isRecord(data) || data.version !== 1 || !isGoalEventName(data.event)) return null;
   if (data.event === "cleared") return { version: 1, event: "cleared" };
   if (!isGoalState(data.goal)) return null;
-  return { version: 1, event: data.event, goal: data.goal };
+  return { version: 1, event: data.event, goal: normalizeGoal(data.goal) };
 }
 
 function isGoalEventName(value: unknown): value is GoalEventName {
@@ -200,6 +231,28 @@ function isGoalEventName(value: unknown): value is GoalEventName {
   );
 }
 
+function normalizeGoal(value: Partial<GoalState>): GoalState {
+  return {
+    ...value,
+    id: value.id!,
+    intent: value.intent!,
+    status: value.status!,
+    createdAt: value.createdAt!,
+    updatedAt: value.updatedAt!,
+    sliceCounter: value.sliceCounter ?? 0,
+    completedSlices: value.completedSlices ?? 0,
+    plannedSlices: Array.isArray(value.plannedSlices) ? value.plannedSlices : [],
+    ...(value.currentSlice
+      ? {
+          currentSlice: {
+            ...value.currentSlice,
+            tasks: Array.isArray(value.currentSlice.tasks) ? value.currentSlice.tasks : [],
+          },
+        }
+      : {}),
+  } as GoalState;
+}
+
 function isGoalState(value: unknown): value is GoalState {
   return (
     isRecord(value) &&
@@ -208,8 +261,9 @@ function isGoalState(value: unknown): value is GoalState {
     ["setup", "active", "paused", "complete"].includes(String(value.status)) &&
     typeof value.createdAt === "number" &&
     typeof value.updatedAt === "number" &&
-    typeof value.sliceCounter === "number" &&
-    typeof value.completedSlices === "number" &&
+    (value.sliceCounter === undefined || typeof value.sliceCounter === "number") &&
+    (value.completedSlices === undefined || typeof value.completedSlices === "number") &&
+    (value.plannedSlices === undefined || Array.isArray(value.plannedSlices)) &&
     (value.currentSlice === undefined || isGoalSlice(value.currentSlice))
   );
 }
@@ -221,7 +275,7 @@ function isGoalSlice(value: unknown): boolean {
     typeof value.name === "string" &&
     typeof value.objective === "string" &&
     typeof value.startedAt === "number" &&
-    Array.isArray(value.tasks)
+    (value.tasks === undefined || Array.isArray(value.tasks))
   );
 }
 

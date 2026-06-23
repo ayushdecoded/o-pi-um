@@ -6,3 +6,4 @@ export const GOAL_WORK_ORDER_MESSAGE_TYPE = "pi-goal-work-order";
 export const GOAL_ROLLUP_MESSAGE_TYPE = "pi-goal-rollup";
 export const HEADLESS_AUTO_APPROVE_ENV = "PI_GOAL_HEADLESS_AUTO_APPROVE";
 export const MAX_SLICE_TASKS = 7;
+export const MAX_PLANNED_SLICES = 8;

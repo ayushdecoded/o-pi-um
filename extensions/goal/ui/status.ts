@@ -58,6 +58,8 @@ export function goalPanelPlaintext(goal: GoalState | null): string {
     goal.blockedDetail ? `Blocked: ${goal.blockedDetail}` : undefined,
     tasks.length ? taskSummaryText(goal) : "Tasks: none yet",
     ...tasks.map((item) => `- ${item.completed ? "[x]" : "[ ]"} ${item.name}`),
+    goal.plannedSlices.length ? "Queued slices:" : undefined,
+    ...goal.plannedSlices.map((item) => `- ${item.name}: ${item.objective}`),
   ]
     .filter(Boolean)
     .join("\n");
@@ -90,9 +92,10 @@ function goalWidgetLines(ctx: ExtensionContext, goal: GoalState): string[] {
   const head = theme.fg(phase ? "accent" : goalColor(goal), `${title} · ◷ ${elapsed}`);
   const work = `  ↳ ${truncate(phase?.detail ?? displayWorkItem(goal), 120)}`;
   const subagents = subagentLine();
+  const queued = queuedSlicesLine(goal);
   const tasks = currentTasks(goal);
   const taskLine = tasks.length ? `  ${phase ? "✓" : "☑"} ${taskSummaryText(goal)}` : undefined;
-  return [head, work, subagents, taskLine].filter((line): line is string => Boolean(line));
+  return [head, work, queued, subagents, taskLine].filter((line): line is string => Boolean(line));
 }
 
 function displayWorkItem(goal: GoalState): string {
@@ -155,6 +158,13 @@ function stopStatusRefresh(): void {
 
 function setDashboardActive(active: boolean): void {
   (globalThis as { __piGoalDashboardActive?: boolean }).__piGoalDashboardActive = active;
+}
+
+function queuedSlicesLine(goal: GoalState): string | undefined {
+  const next = goal.plannedSlices[0];
+  if (!next) return undefined;
+  const rest = Math.max(0, goal.plannedSlices.length - 1);
+  return `  → next ${truncate(next.name, 72)}${rest ? ` · +${rest}` : ""}`;
 }
 
 function subagentLine(): string | undefined {

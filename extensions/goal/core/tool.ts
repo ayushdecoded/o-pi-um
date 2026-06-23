@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { readGoalState } from "../domain/state.ts";
-import type { GoalTaskUpdate, GoalToolParams } from "../domain/types.ts";
+import type { GoalSlicePlan, GoalTaskUpdate, GoalToolParams } from "../domain/types.ts";
 import { GoalToolParamsSchema } from "../params.ts";
 import type { GoalToolResult } from "./actions.ts";
 
@@ -10,6 +10,7 @@ export type GoalToolDeps = {
   updateGoalTasks: (
     ctx: ExtensionContext,
     slice: { name?: string; objective?: string } | undefined,
+    slices: GoalSlicePlan[],
     tasks: GoalTaskUpdate[],
   ) => Promise<GoalToolResult>;
   completeGoal: (ctx: ExtensionContext) => Promise<GoalToolResult>;
@@ -26,7 +27,7 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
     promptSnippet: "Use goal only for durable long-running goal state changes.",
     promptGuidelines: [
       "During setup, call goal(contract=<approved contract>) with no action after the user approves the contract.",
-      'During execution, use goal(action="tasks") for current-slice task changes, goal(action="pause") for user blockers, and goal(action="complete") only after verification.',
+      'During execution, use goal(action="tasks") for current-slice task changes and queued future slice plans, goal(action="pause") for user blockers, and goal(action="complete") only after verification.',
       "Do not use goal to keep work going; the extension schedules visible slices.",
     ],
     parameters: GoalToolParamsSchema,
@@ -48,7 +49,8 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
             );
           return deps.presentGoalContract(ctx, params.contract);
         }
-        if (action === "tasks") return deps.updateGoalTasks(ctx, params.slice, params.tasks ?? []);
+        if (action === "tasks")
+          return deps.updateGoalTasks(ctx, params.slice, params.slices ?? [], params.tasks ?? []);
         if (action === "pause") return deps.pauseGoalFromAgent(ctx);
         if (action === "complete") return deps.completeGoal(ctx);
         return deps.toolResponse(

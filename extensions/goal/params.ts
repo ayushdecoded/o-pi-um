@@ -18,6 +18,15 @@ export const GoalToolParamsSchema = Type.Object({
       objective: Type.Optional(Type.String({ description: "Current-slice objective." })),
     }),
   ),
+  slices: Type.Optional(
+    Type.Array(
+      Type.Object({
+        name: Type.String({ description: "Short future-slice name." }),
+        objective: Type.String({ description: "What this future slice should accomplish." }),
+      }),
+      { description: "Future slice plans to append/update in bulk." },
+    ),
+  ),
   tasks: Type.Optional(
     Type.Array(
       Type.Object({

@@ -31,10 +31,12 @@ Important events:
   -> append contract-approved snapshot
   -> start visible slice
   -> model updates current-slice tasks with name/objective/verification/evidence
+  -> model may queue future slice plans with name/objective in bulk
   -> controller checks current slice tasks
   -> if slice tasks are all done, navigateTree(sliceStartId, { summarize: true })
   -> Pi appends branch_summary under slice-start
   -> append slice-rolled-up snapshot under the summary leaf
+  -> start the next queued slice plan, or a default slice if none is queued
   -> repeat until paused/complete
 ```
 

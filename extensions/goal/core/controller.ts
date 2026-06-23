@@ -14,6 +14,7 @@ import {
   nowSeconds,
   readGoalState,
   setGoalLabel,
+  takeNextSlicePlan,
   touchGoal,
 } from "../domain/state.ts";
 import type { GoalState } from "../domain/types.ts";
@@ -132,12 +133,14 @@ function ensureSliceStarted(
   if (goal.currentSlice?.startEntryId) return goal;
 
   goal.sliceCounter += 1;
+  const plan = takeNextSlicePlan(goal);
+  const objective = plan?.objective ?? activeObjective(goal);
   goal.currentSlice = {
     id: goal.sliceCounter,
-    name: `Slice ${goal.sliceCounter}`,
-    objective: activeObjective(goal),
+    name: plan?.name ?? `Slice ${goal.sliceCounter}`,
+    objective,
     startedAt: nowSeconds(),
-    tasks: [createDefaultSliceTask(activeObjective(goal))],
+    tasks: [createDefaultSliceTask(objective)],
   };
   const entryId = appendGoalState(pi, ctx, "slice-start", goal);
   goal.currentSlice.startEntryId = entryId;

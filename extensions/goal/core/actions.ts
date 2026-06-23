@@ -3,11 +3,13 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   GOAL_STATUS_KEY,
   HEADLESS_AUTO_APPROVE_ENV,
+  MAX_PLANNED_SLICES,
   MAX_SLICE_TASKS,
 } from "../domain/constants.ts";
 import { validateObjective } from "../domain/intent.ts";
 import {
   appendGoalState,
+  applySlicePlans,
   applyTaskUpdates,
   currentTasks,
   incompleteTasks,
@@ -18,7 +20,7 @@ import {
   setGoalLabel,
   touchGoal,
 } from "../domain/state.ts";
-import type { GoalTaskUpdate } from "../domain/types.ts";
+import type { GoalSlicePlan, GoalTaskUpdate } from "../domain/types.ts";
 import { approveGoalContract, goalContractPreviewLines } from "../ui/approval.ts";
 import { updateGoalUi } from "../ui/status.ts";
 import { formatGoalForTool, formatTaskUpdate, taskSummaryText } from "../ui/text.ts";
@@ -72,6 +74,7 @@ export function createGoalActions(pi: ExtensionAPI) {
   async function updateGoalTasks(
     ctx: ExtensionContext,
     sliceRaw: { name?: string; objective?: string } | undefined,
+    slicesRaw: GoalSlicePlan[],
     updatesRaw: GoalTaskUpdate[],
   ) {
     const goal = readGoalState(ctx);
@@ -105,8 +108,17 @@ export function createGoalActions(pi: ExtensionAPI) {
       ];
     });
 
-    if (updates.length === 0 && !sliceChanged)
-      return toolResponse("Provide slice.name/objective or at least one task update.", true);
+    const plans = slicesRaw.flatMap((item): GoalSlicePlan[] => {
+      const name = item.name?.trim();
+      const objective = item.objective?.trim();
+      return name && objective ? [{ name, objective }] : [];
+    });
+
+    if (updates.length === 0 && plans.length === 0 && !sliceChanged)
+      return toolResponse(
+        "Provide slice.name/objective, future slices, or at least one task update.",
+        true,
+      );
 
     const existingNames = new Set(currentTasks(goal).map((item) => item.name.toLowerCase()));
     const newNames = new Set(
@@ -127,6 +139,15 @@ export function createGoalActions(pi: ExtensionAPI) {
       }
     }
 
+    const existingPlans = new Set(goal.plannedSlices.map((item) => item.name.toLowerCase()));
+    const newPlans = new Set(
+      plans.map((item) => item.name.toLowerCase()).filter((item) => !existingPlans.has(item)),
+    );
+    if (existingPlans.size + newPlans.size > MAX_PLANNED_SLICES) {
+      return toolResponse(`Goal can queue at most ${MAX_PLANNED_SLICES} future slices.`, true);
+    }
+
+    const plannedChanged = applySlicePlans(goal, plans);
     const changed = applyTaskUpdates(goal, updates);
     if (sliceChanged)
       setGoalLabel(
@@ -137,7 +158,7 @@ export function createGoalActions(pi: ExtensionAPI) {
     touchGoal(goal);
     appendGoalState(pi, ctx, "tasks-updated", goal);
     updateGoalUi(ctx, goal);
-    return toolResponse(formatTaskUpdate(goal, changed, sliceChanged), false);
+    return toolResponse(formatTaskUpdate(goal, changed, sliceChanged, plannedChanged), false);
   }
 
   async function completeGoal(ctx: ExtensionContext) {
