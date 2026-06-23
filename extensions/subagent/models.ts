@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ModelRoute, ThinkingLevelType } from "./types.ts";
@@ -20,13 +21,15 @@ export function modelsPath(cwd: string): string {
 }
 
 export function readModelsMarkdown(cwd: string): string | null {
-  const file = modelsPath(cwd);
-  if (!fs.existsSync(file)) return null;
-  try {
-    return fs.readFileSync(file, "utf8");
-  } catch {
-    return null;
+  for (const file of [modelsPath(cwd), path.join(os.homedir(), ".pi", "MODELS.md")]) {
+    if (!fs.existsSync(file)) continue;
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
 export function parseModelsMd(cwd: string): Array<ModelRoute & { name: string; body?: string }> {

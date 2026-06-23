@@ -15,6 +15,7 @@ import {
   incompleteTasks,
   isApprovedActiveGoal,
   isApprovedGoal,
+  normalizeSlicePlans,
   nowSeconds,
   readGoalState,
   setGoalLabel,
@@ -32,7 +33,11 @@ export type GoalToolResult = {
 };
 
 export function createGoalActions(pi: ExtensionAPI) {
-  async function presentGoalContract(ctx: ExtensionContext, objectiveRaw: string) {
+  async function presentGoalContract(
+    ctx: ExtensionContext,
+    objectiveRaw: string,
+    slicesRaw: GoalSlicePlan[],
+  ) {
     const objective = objectiveRaw.trim();
     const validation = validateObjective(objective);
     if (validation) return toolResponse(validation, true);
@@ -40,6 +45,14 @@ export function createGoalActions(pi: ExtensionAPI) {
     const goal = readGoalState(ctx);
     if (!goal || goal.status !== "setup")
       return toolResponse("No Goal setup is active. Start with /goal <intent>.", true);
+
+    const plans = normalizeSlicePlans(slicesRaw);
+    if (plans.length > MAX_PLANNED_SLICES)
+      return toolResponse(`Goal can queue at most ${MAX_PLANNED_SLICES} slices.`, true);
+    for (const plan of plans) {
+      if ((plan.tasks?.length ?? 0) > MAX_SLICE_TASKS)
+        return toolResponse(`Each goal slice can track at most ${MAX_SLICE_TASKS} tasks.`, true);
+    }
 
     let approved = headlessAutoApproveEnabled();
     if (ctx.hasUI) {
@@ -60,6 +73,7 @@ export function createGoalActions(pi: ExtensionAPI) {
     }
 
     goal.contract = objective;
+    applySlicePlans(goal, plans);
     goal.status = "active";
     goal.activatedAt = nowSeconds();
     goal.blockedReason = null;
@@ -68,7 +82,10 @@ export function createGoalActions(pi: ExtensionAPI) {
     appendGoalState(pi, ctx, "contract-approved", goal);
     updateGoalUi(ctx, goal);
     ctx.ui.notify("Goal contract approved", "info");
-    return toolResponse(formatGoalForTool(goal), false);
+    return toolResponse(
+      `${formatGoalForTool(goal)}\nReply once with: Goal approved; the visible controller will start the first slice.`,
+      false,
+    );
   }
 
   async function updateGoalTasks(
@@ -108,11 +125,7 @@ export function createGoalActions(pi: ExtensionAPI) {
       ];
     });
 
-    const plans = slicesRaw.flatMap((item): GoalSlicePlan[] => {
-      const name = item.name?.trim();
-      const objective = item.objective?.trim();
-      return name && objective ? [{ name, objective }] : [];
-    });
+    const plans = normalizeSlicePlans(slicesRaw);
 
     if (updates.length === 0 && plans.length === 0 && !sliceChanged)
       return toolResponse(
@@ -137,6 +150,11 @@ export function createGoalActions(pi: ExtensionAPI) {
           true,
         );
       }
+    }
+
+    for (const plan of plans) {
+      if ((plan.tasks?.length ?? 0) > MAX_SLICE_TASKS)
+        return toolResponse(`Each goal slice can track at most ${MAX_SLICE_TASKS} tasks.`, true);
     }
 
     const existingPlans = new Set(goal.plannedSlices.map((item) => item.name.toLowerCase()));
@@ -166,6 +184,11 @@ export function createGoalActions(pi: ExtensionAPI) {
     if (!goal || !isApprovedActiveGoal(goal))
       return toolResponse("No active Goal to complete.", true);
 
+    if (goal.plannedSlices.length > 0)
+      return toolResponse("Cannot complete before the planned slices run.", true);
+    if (!goal.currentSlice && goal.completedSlices === 0)
+      return toolResponse("Cannot complete before at least one slice runs.", true);
+
     const tasks = currentTasks(goal);
     if (goal.currentSlice && tasks.length === 0)
       return toolResponse(
@@ -179,6 +202,19 @@ export function createGoalActions(pi: ExtensionAPI) {
         `Cannot complete goal while current-slice tasks remain incomplete:\n${incomplete.map((item) => `- ${item.name}`).join("\n")}`,
         true,
       );
+
+    if (goal.currentSlice) {
+      goal.completeAfterCurrentSlice = true;
+      goal.blockedReason = null;
+      goal.blockedDetail = undefined;
+      touchGoal(goal);
+      appendGoalState(pi, ctx, "completion-requested", goal);
+      updateGoalUi(ctx, goal);
+      return toolResponse(
+        "Goal completion queued. The controller will roll up the current slice, then mark the Goal complete.",
+        false,
+      );
+    }
 
     goal.status = "complete";
     goal.completedAt = nowSeconds();

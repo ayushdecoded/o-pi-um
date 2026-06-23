@@ -6,7 +6,11 @@ import { GoalToolParamsSchema } from "../params.ts";
 import type { GoalToolResult } from "./actions.ts";
 
 export type GoalToolDeps = {
-  presentGoalContract: (ctx: ExtensionContext, objective: string) => Promise<GoalToolResult>;
+  presentGoalContract: (
+    ctx: ExtensionContext,
+    objective: string,
+    slices: GoalSlicePlan[],
+  ) => Promise<GoalToolResult>;
   updateGoalTasks: (
     ctx: ExtensionContext,
     slice: { name?: string; objective?: string } | undefined,
@@ -22,12 +26,11 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
   pi.registerTool({
     name: "goal",
     label: "Goal",
-    description:
-      "Durable Goal state: approve contract, update tasks/future slices, pause, complete.",
+    description: "Durable Goal state: approve contract/slices, update tasks, pause, complete.",
     promptSnippet: "Goal: durable state only; never continuation.",
     promptGuidelines: [
-      "Setup: after user approval, call goal({ contract }) only.",
-      'Work: goal({ action:"tasks", slice?, tasks?, slices? }); tasks≤7; new tasks need objective+verification; completed tasks need evidence.',
+      "Setup: after approval, call goal({ contract, slices }) with ordered slice/task plan, then reply with one short handoff line only.",
+      'Work: goal({ action:"tasks", slice?, tasks? }); tasks≤7; completed tasks need evidence.',
       "Use pause for blockers; complete only after full-contract verification. Never use goal to schedule/continue.",
     ],
     parameters: GoalToolParamsSchema,
@@ -38,7 +41,7 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
         if (params.contract !== undefined) {
           if (action !== undefined)
             return deps.toolResponse(
-              "Setup contract call must be goal({ contract }) with no action.",
+              "Setup contract call must be goal({ contract, slices }) with no action.",
               true,
             );
           const goal = readGoalState(ctx);
@@ -47,14 +50,14 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
               "Goal contract can only be presented while setup is pending.",
               true,
             );
-          return deps.presentGoalContract(ctx, params.contract);
+          return deps.presentGoalContract(ctx, params.contract, params.slices ?? []);
         }
         if (action === "tasks")
           return deps.updateGoalTasks(ctx, params.slice, params.slices ?? [], params.tasks ?? []);
         if (action === "pause") return deps.pauseGoalFromAgent(ctx);
         if (action === "complete") return deps.completeGoal(ctx);
         return deps.toolResponse(
-          "Use goal({ contract }) during setup, or goal({ action: tasks|pause|complete }) during work.",
+          "Use goal({ contract, slices }) during setup, or goal({ action: tasks|pause|complete }) during work.",
           true,
         );
       } catch (error) {

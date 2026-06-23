@@ -9,6 +9,7 @@ import type {
   GoalSlicePlan,
   GoalState,
   GoalTask,
+  GoalTaskPlan,
   GoalTaskUpdate,
 } from "./types.ts";
 
@@ -105,18 +106,19 @@ export function incompleteTasks(goal: GoalState): GoalTask[] {
   return currentTasks(goal).filter((item) => !item.completed);
 }
 
+export function normalizeSlicePlans(plans: GoalSlicePlan[]): GoalSlicePlan[] {
+  return plans.map(normalizeSlicePlan).filter(Boolean) as GoalSlicePlan[];
+}
+
 export function applySlicePlans(goal: GoalState, plans: GoalSlicePlan[]): string[] {
   const changed: string[] = [];
-  for (const plan of plans) {
-    const name = plan.name.trim();
-    const objective = plan.objective.trim();
-    if (!name || !objective) continue;
+  for (const plan of normalizeSlicePlans(plans)) {
     const existing = goal.plannedSlices.find(
-      (item) => item.name.toLowerCase() === name.toLowerCase(),
+      (item) => item.name.toLowerCase() === plan.name.toLowerCase(),
     );
-    if (existing) existing.objective = objective;
-    else goal.plannedSlices.push({ name, objective });
-    changed.push(`→ ${name}`);
+    if (existing) Object.assign(existing, plan);
+    else goal.plannedSlices.push(plan);
+    changed.push(`→ ${plan.name}`);
   }
   touchGoal(goal);
   return changed;
@@ -124,6 +126,11 @@ export function applySlicePlans(goal: GoalState, plans: GoalSlicePlan[]): string
 
 export function takeNextSlicePlan(goal: GoalState): GoalSlicePlan | undefined {
   return goal.plannedSlices.shift();
+}
+
+export function createSliceTasks(plan: GoalSlicePlan | undefined, objective: string): GoalTask[] {
+  const tasks = plan?.tasks?.map(createTaskFromPlan).filter(Boolean) as GoalTask[] | undefined;
+  return tasks?.length ? tasks : [createDefaultSliceTask(objective)];
 }
 
 export function createDefaultSliceTask(objective: string): GoalTask {
@@ -177,6 +184,29 @@ export function touchGoal(goal: GoalState): void {
   goal.updatedAt = nowSeconds();
 }
 
+function normalizeSlicePlan(plan: GoalSlicePlan): GoalSlicePlan | undefined {
+  const name = plan.name?.trim();
+  if (!name) return undefined;
+  const tasks = plan.tasks?.map(normalizeTaskPlan).filter(Boolean) as GoalTaskPlan[] | undefined;
+  return {
+    name,
+    ...(plan.objective?.trim() ? { objective: plan.objective.trim() } : {}),
+    ...(tasks?.length ? { tasks } : {}),
+  };
+}
+
+function normalizeTaskPlan(task: GoalTaskPlan): GoalTaskPlan | undefined {
+  const name = task.name?.trim();
+  const objective = task.objective?.trim();
+  const verification = task.verification?.trim();
+  return name && objective && verification ? { name, objective, verification } : undefined;
+}
+
+function createTaskFromPlan(task: GoalTaskPlan): GoalTask | undefined {
+  const normalized = normalizeTaskPlan(task);
+  return normalized ? createTask({ ...normalized, completed: false }) : undefined;
+}
+
 export function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
@@ -221,6 +251,7 @@ function isGoalEventName(value: unknown): value is GoalEventName {
       "created",
       "contract-approved",
       "tasks-updated",
+      "completion-requested",
       "paused",
       "resumed",
       "completed",
