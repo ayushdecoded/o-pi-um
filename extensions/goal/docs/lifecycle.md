@@ -12,8 +12,7 @@ Important events:
 
 - `created`
 - `contract-approved`
-- `subtasks-updated`
-- `expanded`
+- `tasks-updated`
 - `paused`
 - `resumed`
 - `completed`
@@ -26,28 +25,28 @@ Important events:
 ```text
 /goal <intent>
   -> append created snapshot
-  -> send hidden setup message
+  -> send visible setup card
   -> model calls goal(contract=...)
   -> user approves contract
   -> append contract-approved snapshot
-  -> start slice
-  -> send hidden work-order message
-  -> wait for idle
-  -> controller seeds one slice subtask
-  -> controller checks current slice subtasks
-  -> if slice subtasks are all done, navigateTree(sliceStartId, { summarize: true })
+  -> start visible slice
+  -> model updates current-slice tasks with name/objective/verification/evidence
+  -> model may queue future slice plans with name/objective in bulk
+  -> controller checks current slice tasks
+  -> if slice tasks are all done, navigateTree(sliceStartId, { summarize: true })
   -> Pi appends branch_summary under slice-start
   -> append slice-rolled-up snapshot under the summary leaf
+  -> start the next queued slice plan, or a default slice if none is queued
   -> repeat until paused/complete
 ```
 
 Tree shape after a slice:
 
 ```text
-goal-slice-start
+s01 slice-start
   ├── detailed work branch
-  │   └── assistant/tool/goal updates
-  └── branch_summary
+  │   └── visible slice card + assistant/tool/goal updates
+  └── ✓ s01 branch_summary
       └── goal slice-rolled-up snapshot   ← active branch
 ```
 
@@ -57,9 +56,9 @@ Pi currently exposes branch summarization through command context, so `/goal` an
 
 - `pi.appendEntry(...)` for durable state snapshots
 - `ctx.sessionManager.getLeafId()` to recover the ID after append
-- `pi.sendMessage(..., { triggerTurn: true })` for hidden setup/work-order turns
-- `ctx.waitForIdle()` to wait for each agent turn
-- current-slice subtasks, capped at 7, as deterministic slice settlement
+- `pi.sendMessage(..., { display: true, triggerTurn: true })` for visible setup/work-order turns
+- `ctx.waitForIdle()`/idle polling to wait for each agent turn
+- current-slice tasks, capped at 7, as deterministic slice settlement
 - `ctx.navigateTree(sliceStartId, { summarize: true })` to roll up finished slices
 
 ## Future Pi API swap

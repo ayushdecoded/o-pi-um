@@ -1,9 +1,8 @@
 # Goal prompts
 
-The extension uses three small prompts:
+The extension uses visible custom messages as the work orders:
 
-- setup prompt: clarify contract, then call `goal({ contract })` after approval
-- ambient goal frame: approved contract, current objective, checklist
-- slice work order: do one coherent work slice, update goal state, pause/complete when appropriate
+- setup card: clarify contract, then call `goal({ contract })` after approval
+- slice card: approved contract, current slice, queued future slices, current tasks, and simple task rules
 
-No prompt asks the model to continue a loop. The command controller schedules slices and Pi tree summaries roll them up.
+There is no hidden continuation prompt and no hidden controller work. The command controller schedules visible slices and Pi tree summaries roll them up.

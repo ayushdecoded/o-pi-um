@@ -1,79 +1,73 @@
-import type { GoalState } from "../domain/types.ts";
-import { activeObjective, sliceSubtasks } from "../domain/state.ts";
-import { MAX_SLICE_SUBTASKS } from "../domain/constants.ts";
+import { MAX_PLANNED_SLICES, MAX_SLICE_TASKS } from "../domain/constants.ts";
+import { activeObjective, currentTasks } from "../domain/state.ts";
+import type { GoalState, GoalTask } from "../domain/types.ts";
 
 export function setupPrompt(goal: GoalState): string {
   return [
-    "The user wants to start a long-running goal.",
-    "Clarify only if the success criteria, validation evidence, boundaries, or ask-before constraints are unclear.",
-    "Do not begin implementation work yet.",
-    "When the contract is clear, call goal with contract set to the full approved contract and no action.",
-    `Each execution slice may track at most ${MAX_SLICE_SUBTASKS} subtasks, so keep slice checklists focused.`,
+    "Goal setup. Ask only for missing success criteria, validation, boundaries, or ask-before rules.",
+    `No implementation. After user approval call goal({contract}) only. Limit: ${MAX_SLICE_TASKS} tasks/slice.`,
     "",
-    "User intent:",
     `<untrusted_intent>\n${escapeXml(goal.intent)}\n</untrusted_intent>`,
   ].join("\n");
-}
-
-export function goalFramePrompt(goal: GoalState): string {
-  if (goal.status === "setup") return setupPrompt(goal);
-  return [
-    "Active long-running goal context.",
-    "Stay inside the approved contract. Use goal only for durable checklist, expansion, pause, or completion state.",
-    "Do not manage scheduling; the extension schedules and rolls up slices.",
-    "",
-    "Approved contract:",
-    `<contract>\n${escapeXml(goal.contract ?? goal.intent)}\n</contract>`,
-    "",
-    "Current objective:",
-    `<objective>\n${escapeXml(activeObjective(goal))}\n</objective>`,
-    formatSubtasks(goal),
-  ]
-    .filter(Boolean)
-    .join("\n");
 }
 
 export function sliceWorkOrderPrompt(goal: GoalState): string {
   const slice = goal.currentSlice;
   return [
-    `Goal slice ${slice?.id ?? goal.sliceCounter + 1}.`,
-    "Do one coherent slice toward the approved contract; prefer one subsystem or milestone over the whole goal.",
-    `Track at most ${MAX_SLICE_SUBTASKS} focused subtasks for this slice.`,
-    "The controller has seeded one slice subtask; mark it complete only when the slice is implemented, reviewed, and verified.",
-    "After implementing this slice, review it thoroughly, find and fix bugs, then run focused validation before marking the slice complete.",
-    'Use goal(action="subtask") to create/update the slice checklist as work becomes clear or completed.',
-    'Call goal(action="complete") only if the full contract is verified. If user input is needed, call goal(action="pause").',
+    `Goal slice: ${sliceLabel(goal)}.`,
+    `One coherent milestone only. State via goal({action:"tasks"}): slice?, tasks≤${MAX_SLICE_TASKS}, slices≤${MAX_PLANNED_SLICES}.`,
+    "Task fields: name, objective, verification; add evidence when completed.",
+    "Review/fix/validate before final task. Pause if blocked. Complete only after full-contract verification.",
     "",
-    goalFramePrompt(goal),
-  ].join("\n");
+    `<contract>\n${escapeXml(goal.contract ?? goal.intent)}\n</contract>`,
+    `<slice name="${escapeXml(slice?.name ?? sliceLabel(goal))}">\n${escapeXml(slice?.objective ?? activeObjective(goal))}\n</slice>`,
+    formatPlannedSlices(goal),
+    formatTasks(currentTasks(goal)),
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function sliceSummaryInstructions(goal: GoalState): string {
   const slice = goal.currentSlice;
   return [
-    `Summarize goal slice ${slice?.id ?? goal.sliceCounter}.`,
-    "Preserve:",
-    "- concrete work completed",
-    "- files read/changed and why",
-    "- validation/tests/evidence",
-    "- current checklist state",
-    "- blockers or user decisions needed",
-    "- recommended next slice",
-    "Keep it compact but sufficient to continue from this summary as the active context.",
+    `Summarize Goal slice ${sliceLabel(goal)} for continuation.`,
+    "Keep: objective, completed tasks, evidence/validation, files changed/read, blockers, next slice name/objective.",
+    "Be compact; omit boilerplate.",
   ].join("\n");
 }
 
-function formatSubtasks(goal: GoalState): string {
-  const current = sliceSubtasks(goal, goal.currentSlice?.id);
-  const carried = goal.subtasks.filter(
-    (item) => !item.completed && item.sliceId !== goal.currentSlice?.id,
-  );
-  const subtasks = current.length > 0 ? current : carried;
-  if (subtasks.length === 0) return "";
+export function sliceLabel(goal: GoalState): string {
+  const slice = goal.currentSlice;
+  if (!slice) return `s${goal.sliceCounter + 1}`;
+  return `s${slice.id} ${slice.name}`.trim();
+}
+
+function formatPlannedSlices(goal: GoalState): string {
+  if (goal.plannedSlices.length === 0) return "";
   return [
     "",
-    current.length > 0 ? "Current slice subtasks:" : "Open carried subtasks:",
-    ...subtasks.map((item) => `- ${item.completed ? "[x]" : "[ ]"} ${escapeXml(item.title)}`),
+    "Queued slices:",
+    ...goal.plannedSlices.map(
+      (slice) => `- ${escapeXml(slice.name)}: ${escapeXml(slice.objective)}`,
+    ),
+  ].join("\n");
+}
+
+function formatTasks(tasks: GoalTask[]): string {
+  if (tasks.length === 0) return "";
+  return [
+    "",
+    "Tasks:",
+    ...tasks.map((task) => {
+      const lines = [
+        `- ${task.completed ? "[x]" : "[ ]"} ${escapeXml(task.name)}`,
+        `  obj: ${escapeXml(task.objective)}`,
+        `  verify: ${escapeXml(task.verification)}`,
+      ];
+      if (task.evidence) lines.push(`  evidence: ${escapeXml(task.evidence)}`);
+      return lines.join("\n");
+    }),
   ].join("\n");
 }
 

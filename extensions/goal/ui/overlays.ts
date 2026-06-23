@@ -78,7 +78,7 @@ export function goalHelpText(): string {
     "/goal clear",
     "/agents",
     "",
-    "/goal starts with contract setup. After approval, the command controller runs one work slice at a time and uses Pi tree summarization to roll each slice into a compact branch summary.",
+    "/goal starts with contract setup. After approval, Goal runs one visible work slice at a time and rolls each completed slice into a compact Pi branch summary.",
     `Headless tests: set ${HEADLESS_AUTO_APPROVE_ENV}=1 to allow contract activation without UI.`,
   ].join("\n");
 }

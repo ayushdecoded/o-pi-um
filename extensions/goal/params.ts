@@ -3,28 +3,40 @@ import { Type } from "typebox";
 
 export const GoalToolParamsSchema = Type.Object({
   action: Type.Optional(
-    StringEnum(["complete", "subtask", "expand", "pause"] as const, {
-      description: "Durable goal state action.",
+    StringEnum(["complete", "tasks", "pause"] as const, {
+      description: "Work action: tasks, pause, or complete.",
     }),
   ),
   contract: Type.Optional(
     Type.String({
-      description: "Approved setup contract. Use only while setup is pending, with no action.",
+      description: "Approved setup contract; no action.",
     }),
   ),
-  subtasks: Type.Optional(
+  slice: Type.Optional(
+    Type.Object({
+      name: Type.Optional(Type.String({ description: "Current slice name." })),
+      objective: Type.Optional(Type.String({ description: "Current slice objective." })),
+    }),
+  ),
+  slices: Type.Optional(
     Type.Array(
       Type.Object({
-        subtask: Type.String({ description: "Title." }),
-        completed: Type.Optional(Type.Boolean({ description: "Done?" })),
+        name: Type.String({ description: "Future slice name." }),
+        objective: Type.String({ description: "Future slice objective." }),
       }),
-      { description: "Batch subtask updates." },
+      { description: "Queued future slice plans." },
     ),
   ),
-  expansions: Type.Optional(
-    Type.Object({
-      add: Type.Optional(Type.Array(Type.String({ description: "Add objective." }))),
-      drop: Type.Optional(Type.Number({ description: "Drop objective index." })),
-    }),
+  tasks: Type.Optional(
+    Type.Array(
+      Type.Object({
+        name: Type.String({ description: "Task name." }),
+        objective: Type.Optional(Type.String({ description: "Task output." })),
+        verification: Type.Optional(Type.String({ description: "Done when..." })),
+        completed: Type.Optional(Type.Boolean({ description: "Done?" })),
+        evidence: Type.Optional(Type.String({ description: "Completion proof." })),
+      }),
+      { description: "Current-slice task updates; new tasks need objective+verification." },
+    ),
   ),
 });

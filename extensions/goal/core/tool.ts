@@ -1,20 +1,17 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import type { GoalToolParams } from "../domain/types.ts";
-import { GoalToolParamsSchema } from "../params.ts";
 import { readGoalState } from "../domain/state.ts";
+import type { GoalSlicePlan, GoalTaskUpdate, GoalToolParams } from "../domain/types.ts";
+import { GoalToolParamsSchema } from "../params.ts";
 import type { GoalToolResult } from "./actions.ts";
 
 export type GoalToolDeps = {
   presentGoalContract: (ctx: ExtensionContext, objective: string) => Promise<GoalToolResult>;
-  updateGoalSubtasks: (
+  updateGoalTasks: (
     ctx: ExtensionContext,
-    subtasks: Array<{ subtask?: string; title?: string; completed?: boolean }>,
-  ) => Promise<GoalToolResult>;
-  expandGoal: (
-    ctx: ExtensionContext,
-    objectives: string[],
-    drop?: number,
+    slice: { name?: string; objective?: string } | undefined,
+    slices: GoalSlicePlan[],
+    tasks: GoalTaskUpdate[],
   ) => Promise<GoalToolResult>;
   completeGoal: (ctx: ExtensionContext) => Promise<GoalToolResult>;
   pauseGoalFromAgent: (ctx: ExtensionContext) => Promise<GoalToolResult>;
@@ -26,21 +23,22 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
     name: "goal",
     label: "Goal",
     description:
-      "Update durable state for the active long-running goal: contract, subtasks, expansion, pause, or completion.",
-    promptSnippet: "Use goal only for durable long-running goal state changes.",
+      "Durable Goal state: approve contract, update tasks/future slices, pause, complete.",
+    promptSnippet: "Goal: durable state only; never continuation.",
     promptGuidelines: [
-      "During setup, call goal(contract=<approved contract>) with no action after the user approves the contract.",
-      'During execution, use goal(action="subtask") for checklist changes, goal(action="pause") for user blockers, and goal(action="complete") only after verification.',
-      "Do not use goal to keep work going; the extension schedules slices.",
+      "Setup: after user approval, call goal({ contract }) only.",
+      'Work: goal({ action:"tasks", slice?, tasks?, slices? }); tasks≤7; new tasks need objective+verification; completed tasks need evidence.',
+      "Use pause for blockers; complete only after full-contract verification. Never use goal to schedule/continue.",
     ],
     parameters: GoalToolParamsSchema,
+    executionMode: "sequential",
     async execute(_toolCallId, params: GoalToolParams, _signal, _onUpdate, ctx) {
       try {
         const action = params.action;
         if (params.contract !== undefined) {
           if (action !== undefined)
             return deps.toolResponse(
-              "During setup, call goal(contract=<approved contract>) with no action.",
+              "Setup contract call must be goal({ contract }) with no action.",
               true,
             );
           const goal = readGoalState(ctx);
@@ -51,13 +49,12 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
             );
           return deps.presentGoalContract(ctx, params.contract);
         }
-        if (action === "subtask") return deps.updateGoalSubtasks(ctx, params.subtasks ?? []);
-        if (action === "expand")
-          return deps.expandGoal(ctx, params.expansions?.add ?? [], params.expansions?.drop);
+        if (action === "tasks")
+          return deps.updateGoalTasks(ctx, params.slice, params.slices ?? [], params.tasks ?? []);
         if (action === "pause") return deps.pauseGoalFromAgent(ctx);
         if (action === "complete") return deps.completeGoal(ctx);
         return deps.toolResponse(
-          "Goal tool needs contract=<approved setup contract> while setup is pending, or action=subtask|expand|pause|complete during execution.",
+          "Use goal({ contract }) during setup, or goal({ action: tasks|pause|complete }) during work.",
           true,
         );
       } catch (error) {

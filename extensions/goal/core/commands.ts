@@ -52,7 +52,7 @@ async function handleGoalCommand(
 
   if (lower === "pause") {
     if (!goal || goal.status !== "active") {
-      ctx.ui.notify("No active goal to pause.", "warning");
+      ctx.ui.notify("No active Goal to pause.", "warning");
       return;
     }
     goal.status = "paused";
@@ -67,7 +67,7 @@ async function handleGoalCommand(
 
   if (lower === "resume") {
     if (!goal) {
-      ctx.ui.notify("No goal to resume.", "warning");
+      ctx.ui.notify("No Goal to resume.", "warning");
       return;
     }
     if (goal.status === "complete") {
@@ -89,7 +89,7 @@ async function handleGoalCommand(
   if (lower === "clear" || lower === "cancel") {
     appendGoalCleared(pi, ctx);
     updateGoalUi(ctx, null);
-    ctx.ui.notify(goal ? "Goal cleared" : "No goal to clear", goal ? "info" : "warning");
+    ctx.ui.notify(goal ? "Goal cleared" : "No Goal to clear", goal ? "info" : "warning");
     return;
   }
 
@@ -103,7 +103,7 @@ async function handleGoalCommand(
     const ok =
       !ctx.hasUI ||
       (await ctx.ui.confirm(
-        "Replace current goal?",
+        "Replace current Goal?",
         `Current: ${goal.intent}\n\nNew: ${parsed.intent}`,
       ));
     if (!ok) return;
@@ -111,8 +111,8 @@ async function handleGoalCommand(
 
   const next = createGoal(parsed.intent);
   const createdId = appendGoalState(pi, ctx, "created", next);
-  setGoalLabel(pi, createdId, `goal:${next.id.slice(0, 8)}:created`);
-  pi.setSessionName(`Goal: ${parsed.intent.slice(0, 72)}`);
+  setGoalLabel(pi, createdId, `Goal · ${slug(parsed.intent)}`);
+  pi.setSessionName(`Goal · ${parsed.intent.slice(0, 72)}`);
   updateGoalUi(ctx, next);
   ctx.ui.notify("Goal setup started", "info");
   await runGoalController(pi, ctx);
@@ -124,6 +124,14 @@ async function withCommandErrors(ctx: ExtensionContext, fn: () => Promise<void>)
   } catch (error) {
     ctx.ui.notify(`Goal command failed: ${errorMessage(error)}`, "error");
   }
+}
+
+function slug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
 function errorMessage(error: unknown): string {
