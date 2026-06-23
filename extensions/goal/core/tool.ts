@@ -23,12 +23,12 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
     name: "goal",
     label: "Goal",
     description:
-      "Update durable state for the active long-running goal: contract, current-slice tasks, pause, or completion.",
-    promptSnippet: "Use goal only for durable long-running goal state changes.",
+      "Durable Goal state: approve contract, update tasks/future slices, pause, complete.",
+    promptSnippet: "Goal: durable state only; never continuation.",
     promptGuidelines: [
-      "During setup, call goal(contract=<approved contract>) with no action after the user approves the contract.",
-      'During execution, use goal(action="tasks") for current-slice task changes and queued future slice plans, goal(action="pause") for user blockers, and goal(action="complete") only after verification.',
-      "Do not use goal to keep work going; the extension schedules visible slices.",
+      "Setup: after user approval, call goal({ contract }) only.",
+      'Work: goal({ action:"tasks", slice?, tasks?, slices? }); tasks≤7; new tasks need objective+verification; completed tasks need evidence.',
+      "Use pause for blockers; complete only after full-contract verification. Never use goal to schedule/continue.",
     ],
     parameters: GoalToolParamsSchema,
     executionMode: "sequential",
@@ -38,7 +38,7 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
         if (params.contract !== undefined) {
           if (action !== undefined)
             return deps.toolResponse(
-              "During setup, call goal(contract=<approved contract>) with no action.",
+              "Setup contract call must be goal({ contract }) with no action.",
               true,
             );
           const goal = readGoalState(ctx);
@@ -54,7 +54,7 @@ export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
         if (action === "pause") return deps.pauseGoalFromAgent(ctx);
         if (action === "complete") return deps.completeGoal(ctx);
         return deps.toolResponse(
-          "Goal tool needs contract=<approved setup contract> while setup is pending, or action=tasks|pause|complete during execution.",
+          "Use goal({ contract }) during setup, or goal({ action: tasks|pause|complete }) during work.",
           true,
         );
       } catch (error) {
