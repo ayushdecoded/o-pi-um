@@ -21,6 +21,7 @@
   },
   "pi": {
     "extensions": [
+      "./extensions/skill-commands/index.ts",
       "./extensions/goal/index.ts",
       "./extensions/subagent/index.ts",
       "./extensions/compaction/index.ts",

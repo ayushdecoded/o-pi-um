@@ -23,6 +23,13 @@ export type GoalToolDeps = {
 };
 
 export function registerGoalTool(pi: ExtensionAPI, deps: GoalToolDeps): void {
+  pi.on("tool_result", (event) => {
+    if (event.toolName !== "goal") return;
+    if ((event.details as { goalToolError?: unknown } | undefined)?.goalToolError) {
+      return { details: {}, isError: true };
+    }
+  });
+
   pi.registerTool({
     name: "goal",
     label: "Goal",

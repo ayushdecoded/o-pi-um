@@ -22,23 +22,18 @@ export default function registerFooter(pi: ExtensionAPI): void {
         render(width: number): string[] {
           const active = sessionUsageTotals(ctx.sessionManager.getBranch());
           const ledger = sessionUsageTotals(ctx.sessionManager.getEntries());
+          const branch = footerData.getGitBranch() ?? undefined;
           const left = [
-            color(theme, "muted", footerData.getGitBranch() ?? ""),
-            isSubagent(ctx) ? color(theme, "dim", "[sub]") : "",
+            branchLabel(branch, theme),
+            isSubagent() ? chip("sub", "dim", theme) : "",
             contextLabel(ctx, theme),
-            color(
-              theme,
-              "dim",
-              `↑${formatCompactNumber(active.inputTokens)} ↓${formatCompactNumber(active.outputTokens)}`,
-            ),
             cacheLabel(active, theme),
             activeCostLabel(active, theme),
             ledgerCostLabel(active, ledger, theme),
           ]
             .filter(Boolean)
-            .join(color(theme, "muted", "  "));
-          const right =
-            `${color(theme, "dim", ctx.model?.provider ?? "")} ${theme.bold(color(theme, "accent", ctx.model?.id ?? "no-model"))}`.trim();
+            .join(color(theme, "borderMuted", "  · "));
+          const right = modelLabel(ctx.model?.provider, ctx.model?.id, theme);
           return [fit(left, right, width)];
         },
       };
@@ -46,19 +41,21 @@ export default function registerFooter(pi: ExtensionAPI): void {
   });
 }
 
+function branchLabel(branch: string | undefined, theme: any): string {
+  if (!branch) return "";
+  return `${color(theme, "dim", "")} ${color(theme, "muted", branch)}`;
+}
+
 function contextLabel(ctx: any, theme: any): string {
   const usage = ctx.getContextUsage();
   if (!usage) return "";
-  const pct = usage.percent === null ? "?" : `${Math.round(usage.percent)}%`;
-  const colorName =
-    usage.percent === null
-      ? "muted"
-      : usage.percent >= 90
-        ? "error"
-        : usage.percent >= 70
-          ? "warning"
-          : "muted";
-  return color(theme, colorName, `${pct}/${formatCompactNumber(usage.contextWindow)}`);
+  const pct = usage.percent === null ? undefined : Math.round(usage.percent);
+  const label =
+    pct === undefined
+      ? `?%/${formatCompactNumber(usage.contextWindow)}`
+      : `${pct}%/${formatCompactNumber(usage.contextWindow)}`;
+  if (pct === undefined || pct <= 65) return label;
+  return color(theme, pct > 75 ? "error" : "warning", label);
 }
 
 function cacheLabel(totals: UsageTotals, theme: any): string {
@@ -66,30 +63,52 @@ function cacheLabel(totals: UsageTotals, theme: any): string {
   if (cacheHit === undefined) return "";
   const hit = Math.round(cacheHit);
   const colorName = hit >= 98 ? "success" : hit >= 92 ? "warning" : "error";
-  const icon = hit >= 98 ? "●" : hit >= 92 ? "▲" : "●";
-  return color(theme, colorName, `${icon}${hit}%`);
+  return `${color(theme, colorName, "↻")} ${color(theme, colorName, `${hit}%`)}`;
 }
 
 function activeCostLabel(totals: UsageTotals, theme: any): string {
-  return costLabel(totals, "↳", theme);
+  return color(theme, "accent", `↳$${formatCost(totals.costUsd)}`);
 }
 
 function ledgerCostLabel(active: UsageTotals, ledger: UsageTotals, theme: any): string {
-  // ↳ follows the active tree branch; ◆ scans the whole persisted session ledger.
+  // Active follows the current branch; ledger scans the whole persisted session tree.
   if (ledger.costUsd <= active.costUsd + 0.005) return "";
   return costLabel(ledger, "◆", theme);
 }
 
-function costLabel(totals: UsageTotals, icon: string, theme: any): string {
-  return color(
-    theme,
-    totals.costUsd >= 2 ? "warning" : "muted",
-    `${icon}$${formatCost(totals.costUsd)}`,
-  );
+function costLabel(totals: UsageTotals, label: string, theme: any): string {
+  const colorName = totals.costUsd >= 5 ? "error" : totals.costUsd >= 2 ? "warning" : "muted";
+  return color(theme, colorName, `${label}$${formatCost(totals.costUsd)}`);
 }
 
-function isSubagent(ctx: any): boolean {
-  return Boolean((ctx.sessionManager as { isSubagent?: () => boolean }).isSubagent?.());
+function modelLabel(provider: string | undefined, id: string | undefined, theme: any): string {
+  const providerText = shortProvider(provider ?? "");
+  const modelText = shortModel(id ?? "no-model");
+  return `${color(theme, "dim", providerText)} ${theme.bold(color(theme, "accent", modelText))}`.trim();
+}
+
+function chip(text: string, colorName: string, theme: any): string {
+  return `${color(theme, "borderMuted", "[")}${color(theme, colorName, text)}${color(theme, "borderMuted", "]")}`;
+}
+
+function shortProvider(provider: string): string {
+  return provider
+    .replace(/^openai-codex$/, "codex")
+    .replace(/^openrouter$/, "or")
+    .replace(/^anthropic$/, "anth")
+    .replace(/^cursor$/, "cursor");
+}
+
+function shortModel(model: string): string {
+  return model
+    .replace(/^gpt-/, "gpt-")
+    .replace(/^claude-/, "claude-")
+    .replace(/-latest$/, "")
+    .replace(/-preview$/, "");
+}
+
+function isSubagent(): boolean {
+  return Number(process.env.PI_SUBAGENT_DEPTH ?? "0") > 0;
 }
 
 function fit(left: string, right: string, width: number): string {

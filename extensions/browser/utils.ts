@@ -65,7 +65,7 @@ export function contentText(content: unknown): string {
       typeof part === "string"
         ? part
         : typeof part === "object" && part && "text" in part
-          ? String((part as any).text ?? "")
+          ? String((part as { text?: unknown }).text ?? "")
           : "",
     )
     .join("\n");

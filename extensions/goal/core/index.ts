@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { readGoalState } from "../domain/state.ts";
 import { registerGoalMessageRenderers } from "../ui/messages.ts";
-import { updateGoalUi } from "../ui/status.ts";
+import { registerGoalDashboardEvents, updateGoalUi } from "../ui/status.ts";
 import { createGoalActions, toolResponse } from "./actions.ts";
 import { registerGoalCommands } from "./commands.ts";
 import { scheduleGoalController } from "./controller.ts";
@@ -10,6 +10,7 @@ import { summarizeGoalTreeRollup } from "./summary.ts";
 import { registerGoalTool } from "./tool.ts";
 
 export default function goalExpansion(pi: ExtensionAPI) {
+  registerGoalDashboardEvents(pi);
   const actions = createGoalActions(pi);
 
   registerGoalTool(pi, {

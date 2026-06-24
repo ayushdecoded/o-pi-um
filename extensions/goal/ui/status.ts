@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import {
   GOAL_ROLLUP_MESSAGE_TYPE,
@@ -18,10 +18,25 @@ import { formatElapsed, truncate } from "./format.ts";
 import { taskSummaryText } from "./text.ts";
 
 type GoalUiPhase = { goalId: string; title: string; detail: string };
+type DashboardSubagentRun = { task?: string; model?: string; startedAt?: number };
 
 let statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let refreshCtx: ExtensionContext | undefined;
 let activePhase: GoalUiPhase | null = null;
+let dashboardSubagentRuns: DashboardSubagentRun[] = [];
+let publishDashboardActive: (active: boolean) => void = () => {};
+
+export function registerGoalDashboardEvents(pi: Pick<ExtensionAPI, "events">): void {
+  publishDashboardActive = (active) => pi.events.emit("goal-dashboard:active", { active });
+  pi.events.on("subagent:active", (data) => {
+    dashboardSubagentRuns = parseSubagentRuns(data);
+    if (refreshCtx?.hasUI) renderGoalUi(refreshCtx, readGoalState(refreshCtx));
+  });
+}
+
+export function activeSubagentRuns(): DashboardSubagentRun[] {
+  return dashboardSubagentRuns;
+}
 
 export function setGoalUiPhase(goalId: string, title?: string, detail?: string): void {
   activePhase = title && detail ? { goalId, title, detail } : null;
@@ -159,7 +174,7 @@ function stopStatusRefresh(): void {
 }
 
 function setDashboardActive(active: boolean): void {
-  (globalThis as { __piGoalDashboardActive?: boolean }).__piGoalDashboardActive = active;
+  publishDashboardActive(active);
 }
 
 function queuedSlicesLine(goal: GoalState): string | undefined {
@@ -182,12 +197,23 @@ function subagentLine(): string | undefined {
 }
 
 function activeSubagents(): Array<{ model?: string }> {
-  const data = (
-    globalThis as {
-      __piGoalDashboardSubagents?: { runs?: Array<{ model?: string }> };
-    }
-  ).__piGoalDashboardSubagents;
-  return Array.isArray(data?.runs) ? data.runs : [];
+  return dashboardSubagentRuns;
+}
+
+function parseSubagentRuns(data: unknown): DashboardSubagentRun[] {
+  const runs = (data as { runs?: unknown }).runs;
+  if (!Array.isArray(runs)) return [];
+  return runs.flatMap((run) => {
+    if (!run || typeof run !== "object") return [];
+    const item = run as Record<string, unknown>;
+    return [
+      {
+        task: typeof item.task === "string" ? item.task : undefined,
+        model: typeof item.model === "string" ? item.model : undefined,
+        startedAt: typeof item.startedAt === "number" ? item.startedAt : undefined,
+      },
+    ];
+  });
 }
 
 // UI-only time accounting. This is intentionally derived from visible goal turn

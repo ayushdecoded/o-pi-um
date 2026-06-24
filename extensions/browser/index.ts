@@ -15,7 +15,7 @@ function latestUserMentionsZen(ctx: { sessionManager: { getEntries(): unknown[] 
   // Only inspect the latest user turn so older mentions of "zen" do not stick forever.
   const entries = ctx.sessionManager.getEntries();
   for (let i = entries.length - 1; i >= 0; i--) {
-    const message = (entries[i] as any)?.message;
+    const message = (entries[i] as { message?: { role?: string; content?: unknown } })?.message;
     if (message?.role !== "user") continue;
     return /\bzen\b/i.test(contentText(message.content));
   }
@@ -109,7 +109,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI): void {
           return {
             content: [
               { type: "text", text: shot.text },
-              { type: "image", data: shot.data, mimeType: "image/png" } as any,
+              { type: "image" as const, data: shot.data, mimeType: "image/png" },
             ],
             details: { action: params.action ?? "screenshot" },
           };
@@ -119,11 +119,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI): void {
         return { content: [{ type: "text", text }], details: { action: params.action ?? "state" } };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `browser failed: ${message}` }],
-          isError: true,
-          details: { action: params.action ?? "state" },
-        };
+        throw new Error(`browser failed: ${message}`);
       }
     },
   });

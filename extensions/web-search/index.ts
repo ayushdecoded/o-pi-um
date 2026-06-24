@@ -97,13 +97,7 @@ export default function registerWebSearch(pi: ExtensionAPI): void {
           };
         }
 
-        if (queries.length === 0) {
-          return {
-            content: [{ type: "text", text: "web_search requires either query or url." }],
-            isError: true,
-            details: { query: "", results: [] },
-          };
-        }
+        if (queries.length === 0) throw new Error("web_search requires either query or url.");
 
         // Multiple queries run in parallel and are rendered as separate result groups.
         const groups = await Promise.all(
@@ -142,11 +136,7 @@ export default function registerWebSearch(pi: ExtensionAPI): void {
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return {
-          content: [{ type: "text", text: `web_search failed: ${message}` }],
-          isError: true,
-          details: { query: label, results: [] },
-        };
+        throw new Error(`web_search failed: ${message}`);
       }
     },
   });

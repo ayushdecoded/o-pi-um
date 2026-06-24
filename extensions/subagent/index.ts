@@ -9,7 +9,7 @@ import { messageSubagentSession, runParallelSubagents, runPiSubagent } from "./r
 import { SubagentParams } from "./schema.ts";
 import { formatParallelRuns, formatRun, renderRunsForUser, shortTask } from "./text.ts";
 import type { SubagentParamsType, ToolDetails } from "./types.ts";
-import { stopPanel } from "./panel.ts";
+import { connectPanelEvents, stopPanel } from "./panel.ts";
 import { registerModelCommands } from "./model-commands.ts";
 
 export default function registerSubagentExtension(pi: ExtensionAPI): void {
@@ -21,7 +21,9 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
     systemPrompt: `${event.systemPrompt}\n\n${formatSubagentPrompt(ctx)}`,
   }));
 
+  connectPanelEvents(pi);
   pi.registerTool(createSubagentTool(pi));
+  registerSubagentResultStatus(pi);
   registerModelCommands(pi);
 
   // Model routing is system-owned here: warn early, but don't block unrelated goal work.
@@ -73,14 +75,13 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
         );
         return {
           content: [{ type: "text", text: formatParallelRuns(runs) }],
-          isError: runs.some((run) => run.status !== "complete"),
           details: { runs },
         };
       }
       // `sessionFile` means continue an existing child instead of spawning a related duplicate.
       if (params.sessionFile?.trim()) {
         if (!params.task?.trim())
-          return errorResult("Provide `task` with `sessionFile` for a subagent follow-up.");
+          throw new Error("Provide `task` with `sessionFile` for a subagent follow-up.");
         const run = await messageSubagentSession(
           {
             sessionFile: params.sessionFile,
@@ -94,12 +95,11 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
         );
         return {
           content: [{ type: "text", text: formatRun(run) }],
-          isError: run.status !== "complete",
           details: { runs: [run] },
         };
       }
       if (!params.task?.trim())
-        return errorResult(
+        throw new Error(
           "Provide `task` for one subagent, `tasks` for parallel subagents, or `task` + `sessionFile` for a follow-up.",
         );
       // Solo path: one child session for one narrow task.
@@ -121,7 +121,6 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
       });
       return {
         content: [{ type: "text", text: formatRun(run) }],
-        isError: run.status !== "complete",
         details: { runs: [run] },
       };
     },
@@ -144,6 +143,10 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
   };
 }
 
-function errorResult(text: string) {
-  return { content: [{ type: "text" as const, text }], isError: true, details: { runs: [] } };
+function registerSubagentResultStatus(pi: ExtensionAPI): void {
+  pi.on("tool_result", (event) => {
+    if (event.toolName !== "subagent") return;
+    const details = event.details as ToolDetails | undefined;
+    if (details?.runs?.some((run) => run.status !== "complete")) return { isError: true };
+  });
 }

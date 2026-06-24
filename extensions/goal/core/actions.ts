@@ -28,8 +28,7 @@ import { formatGoalForTool, formatTaskUpdate, taskSummaryText } from "../ui/text
 
 export type GoalToolResult = {
   content: Array<{ type: "text"; text: string }>;
-  details: Record<string, unknown>;
-  isError: boolean;
+  details: { goalToolError?: true };
 };
 
 export function createGoalActions(pi: ExtensionAPI) {
@@ -250,7 +249,7 @@ export function createGoalActions(pi: ExtensionAPI) {
 }
 
 export function toolResponse(text: string, isError: boolean): GoalToolResult {
-  return { content: [{ type: "text", text }], details: {}, isError };
+  return { content: [{ type: "text", text }], details: isError ? { goalToolError: true } : {} };
 }
 
 function startLabel(id: number, name: string): string {

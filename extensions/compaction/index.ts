@@ -43,7 +43,7 @@ export default function registerCompactionExtension(pi: ExtensionAPI): void {
     await compactWithCallbacks(ctx, usage.percent || initialPercent);
   }
 
-  // Pi owns how compaction is written. This hook only swaps the summarizer model
+  // Pi owns the native compaction UI. This hook only swaps the summarizer model
   // to the project-local `.pi/MODELS.md` `## Compaction` route.
   pi.on("session_before_compact", async (event, ctx) => {
     const routed = await getCompactionModel(ctx);
@@ -73,12 +73,11 @@ function compactWithCallbacks(ctx: ExtensionContext, percent: number): Promise<v
     ctx.compact({
       customInstructions: `This is an automatic turn-boundary checkpoint because context reached ${percent.toFixed(1)}%. Preserve current task state, completed changes, changed files, validation results, blockers, next steps, and explicit user constraints. Keep it concise and continuation-oriented.`,
       onComplete: () => {
-        ctx.ui.notify("Turn-boundary checkpoint compacted", "info");
         resolve();
       },
       onError: (error: Error) => {
         if (!/Already compacted|Nothing to compact/i.test(error.message)) {
-          ctx.ui.notify(`Turn-boundary compaction failed: ${error.message}`, "warning");
+          ctx.ui.notify(`Compaction failed: ${error.message}`, "error");
         }
         resolve();
       },

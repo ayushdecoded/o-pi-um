@@ -1,13 +1,36 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { WIDGET_KEY } from "./constants.ts";
 import { activeRuns } from "./runtime.ts";
 import type { ActiveRun } from "./types.ts";
 import { shortTask } from "./text.ts";
 
 let widgetTimer: NodeJS.Timeout | undefined;
+let panelCtx: ExtensionContext | undefined;
+let goalDashboardActive = false;
+let publishSubagentSnapshot: (runs: ActiveRun[]) => void = () => {};
+
+export function connectPanelEvents(pi: Pick<ExtensionAPI, "events">): void {
+  publishSubagentSnapshot = (runs) => {
+    pi.events.emit("subagent:active", {
+      updatedAt: Date.now(),
+      runs: runs.map((run) => ({
+        id: run.id,
+        task: run.task,
+        model: run.model,
+        startedAt: run.startedAt,
+        status: run.status,
+      })),
+    });
+  };
+  pi.events.on("goal-dashboard:active", (data) => {
+    goalDashboardActive = Boolean((data as { active?: unknown }).active);
+    if (panelCtx?.hasUI) renderPanel(panelCtx);
+  });
+}
 
 export function renderPanel(ctx: ExtensionContext): void {
   if (!ctx.hasUI) return;
+  panelCtx = ctx;
   const runs = Array.from(activeRuns.values());
   // Publish first so the goal dashboard can render subagent chips instead of a separate widget.
   publishDashboardSubagents(runs);
@@ -16,7 +39,7 @@ export function renderPanel(ctx: ExtensionContext): void {
     return;
   }
   // When goal dashboard is active, it owns the visual surface and reads our published data.
-  if ((globalThis as { __piGoalDashboardActive?: boolean }).__piGoalDashboardActive) {
+  if (goalDashboardActive) {
     ctx.ui.setWidget(WIDGET_KEY, undefined);
     return;
   }
@@ -47,6 +70,7 @@ export function startPanel(ctx: ExtensionContext): void {
 export function stopPanel(ctx?: ExtensionContext): void {
   if (widgetTimer) clearInterval(widgetTimer);
   widgetTimer = undefined;
+  panelCtx = undefined;
   if (ctx?.hasUI) ctx.ui.setWidget(WIDGET_KEY, undefined);
   publishDashboardSubagents([]);
 }
@@ -57,14 +81,5 @@ function clearPanel(ctx: ExtensionContext): void {
 }
 
 function publishDashboardSubagents(runs: ActiveRun[]): void {
-  (globalThis as { __piGoalDashboardSubagents?: unknown }).__piGoalDashboardSubagents = {
-    updatedAt: Date.now(),
-    runs: runs.map((run) => ({
-      id: run.id,
-      task: run.task,
-      model: run.model,
-      startedAt: run.startedAt,
-      status: run.status,
-    })),
-  };
+  publishSubagentSnapshot(runs);
 }

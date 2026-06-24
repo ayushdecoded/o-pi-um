@@ -3,6 +3,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 
 import { HEADLESS_AUTO_APPROVE_ENV } from "../domain/constants.ts";
 import { truncate } from "./format.ts";
+import { activeSubagentRuns } from "./status.ts";
 
 export async function showSubagentDetails(ctx: ExtensionContext): Promise<void> {
   if (!ctx.hasUI) {
@@ -84,12 +85,5 @@ export function goalHelpText(): string {
 }
 
 function activeSubagents(): Array<{ task?: string; model?: string; startedAt?: number }> {
-  const data = (
-    globalThis as {
-      __piGoalDashboardSubagents?: {
-        runs?: Array<{ task?: string; model?: string; startedAt?: number }>;
-      };
-    }
-  ).__piGoalDashboardSubagents;
-  return Array.isArray(data?.runs) ? data.runs : [];
+  return activeSubagentRuns();
 }
