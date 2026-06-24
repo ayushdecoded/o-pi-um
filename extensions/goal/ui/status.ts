@@ -59,7 +59,9 @@ export function goalPanelPlaintext(goal: GoalState | null): string {
     tasks.length ? taskSummaryText(goal) : "Tasks: none yet",
     ...tasks.map((item) => `- ${item.completed ? "[x]" : "[ ]"} ${item.name}`),
     goal.plannedSlices.length ? "Queued slices:" : undefined,
-    ...goal.plannedSlices.map((item) => `- ${item.name}: ${item.objective}`),
+    ...goal.plannedSlices.map(
+      (item) => `- ${item.name}${item.objective ? `: ${item.objective}` : ""}`,
+    ),
   ]
     .filter(Boolean)
     .join("\n");

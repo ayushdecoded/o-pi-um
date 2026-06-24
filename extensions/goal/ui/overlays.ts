@@ -78,7 +78,7 @@ export function goalHelpText(): string {
     "/goal clear",
     "/agents",
     "",
-    "/goal starts with contract setup. After approval, Goal runs one visible work slice at a time and rolls each completed slice into a compact Pi branch summary.",
+    "/goal starts with contract setup. After approval, Goal auto-runs visible work slices and rolls each completed segment into a compact summary.",
     `Headless tests: set ${HEADLESS_AUTO_APPROVE_ENV}=1 to allow contract activation without UI.`,
   ].join("\n");
 }

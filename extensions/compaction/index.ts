@@ -1,9 +1,7 @@
 import { compact, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { Model } from "@earendil-works/pi-ai";
 
-import { resolveModelRoute } from "../subagent/models.ts";
+import { getCompactionModel, modelName } from "./model.ts";
 
-const COMPACTION_ROUTE = "Compaction";
 const TURN_END_COMPACTION_THRESHOLD_PERCENT = 80;
 
 export default function registerCompactionExtension(pi: ExtensionAPI): void {
@@ -48,29 +46,23 @@ export default function registerCompactionExtension(pi: ExtensionAPI): void {
   // Pi owns how compaction is written. This hook only swaps the summarizer model
   // to the project-local `.pi/MODELS.md` `## Compaction` route.
   pi.on("session_before_compact", async (event, ctx) => {
-    const route = resolveModelRoute(ctx, COMPACTION_ROUTE);
-    const model = route.model ? findModel(ctx, route.model) : undefined;
-    if (!model) {
+    const routed = await getCompactionModel(ctx);
+    if (!routed) {
       ctx.ui.notify("Compaction route unavailable; using current model.", "warning");
       return;
     }
 
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) {
-      ctx.ui.notify(`Compaction model auth failed: ${auth.error}`, "warning");
-      return;
-    }
-
-    ctx.ui.notify(`Compacting with ${model.provider}/${model.id}...`, "info");
+    ctx.ui.notify(`Compacting with ${modelName(routed.model)}...`, "info");
     return {
       compaction: await compact(
         event.preparation,
-        model,
-        auth.apiKey,
-        auth.headers,
+        routed.model,
+        routed.apiKey,
+        routed.headers,
         event.customInstructions,
         event.signal,
-        route.reasoning,
+        routed.reasoning,
+        undefined,
       ),
     };
   });
@@ -104,10 +96,4 @@ async function waitForIdle(ctx: ExtensionContext): Promise<boolean> {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function findModel(ctx: ExtensionContext, fullName: string): Model<any> | undefined {
-  const [provider, ...idParts] = fullName.split("/");
-  const id = idParts.join("/");
-  return provider && id ? ctx.modelRegistry.find(provider, id) : undefined;
 }
