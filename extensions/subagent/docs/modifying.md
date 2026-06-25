@@ -86,7 +86,7 @@ On timeout the tool returns failure text with:
 tmux attach -t <session>
 ```
 
-Do not kill the tmux session on timeout; keeping it inspectable is intentional. User cancellation does kill the tmux session.
+Do not kill the tmux session on timeout; keeping it inspectable is intentional. Timed-out children keep their active-runtime slot until the tmux run writes its exit status. User cancellation does kill the tmux session.
 
 ## Session files
 
@@ -102,7 +102,7 @@ Fresh child sessions are stored under:
 ~/.pi/agent/subagent-sessions
 ```
 
-Follow-ups normalize the provided `sessionFile` path and reuse it exactly.
+Follow-ups normalize the provided `sessionFile` path and only accept existing top-level subagent child JSONL files under `~/.pi/agent/subagent-sessions`.
 
 ## Model routing
 
@@ -119,6 +119,7 @@ Commands:
 
 ```text
 /models
+/models status
 /models setup
 /models bootstrap
 ```

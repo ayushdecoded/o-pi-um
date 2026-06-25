@@ -24,6 +24,23 @@ export function normalizeSessionFile(file: string): string {
   return path.resolve(file.startsWith("~/") ? path.join(os.homedir(), file.slice(2)) : file);
 }
 
+export function isSubagentSessionFile(file: string): boolean {
+  try {
+    const root = fs.realpathSync(SESSION_ROOT);
+    const resolved = fs.realpathSync(file);
+    const relative = path.relative(root, resolved);
+    return Boolean(
+      relative &&
+      !relative.startsWith("..") &&
+      !path.isAbsolute(relative) &&
+      path.dirname(relative) === "." &&
+      /_sub-[^/]+\.jsonl$/.test(path.basename(relative)),
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function ensureSessionRoot(): void {
   fs.mkdirSync(SESSION_ROOT, { recursive: true });
 }

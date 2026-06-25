@@ -54,13 +54,13 @@ s01 slice-start
 
 ## Current workaround
 
-Pi currently exposes tree navigation through command context. `/goal` stores that context, and post-turn auto-run reuses it until Pi exposes a cleaner hook API. The controller uses:
+Pi currently exposes tree navigation through command context. `/goal` stores a guarded per-session command context, and post-turn auto-run reuses it until Pi exposes a cleaner hook API. The controller uses generation/shutdown guards so stale async work cannot append state after session replacement.
 
 - `pi.appendEntry(...)` for durable state snapshots
 - `ctx.sessionManager.getLeafId()` to recover the ID after append
 - `pi.sendMessage(..., { display: true, triggerTurn: true })` for visible setup/work-order turns
 - `ctx.waitForIdle()`/idle polling to wait for each agent turn
-- current-slice tasks, capped at 7, as deterministic slice settlement
+- current-slice tasks, capped at 7, as deterministic slice settlement; completed tasks must have evidence
 - `ctx.navigateTree(sliceStartId, { summarize: true })` to roll up finished slices
 - a tiny `tool_call` guard that blocks non-Goal tools between setup approval and the next visible slice work order
 - a resume guard that refuses to inject a duplicate work order when the session leaf is already a Goal work order, unresolved assistant tool call, or unprocessed tool result

@@ -9,6 +9,7 @@ Keep the model-facing surface small: `action`, `target`, `text`.
 - Put discovery in `snapshot`; keep `read` for text extraction.
 - Actions that change page state should return a post-action snapshot when useful.
 - Keep Chrome and BiDi behavior aligned.
+- Snapshot refs must fail closed when stale; do not fall back from stale `e12` to a different element.
 
 ## Add or change an action
 
@@ -54,7 +55,7 @@ Important pieces:
 - `FIND_ELEMENT_JS` resolves `target=e12`, visible text, and `css:` selectors.
 - `renderSnapshot()` controls model-facing text output.
 
-Keep `snapshotExpression()` and `FIND_ELEMENT_JS` candidate ordering aligned. If they diverge, `target=e12` may click a different element than the snapshot showed.
+Keep `snapshotExpression()` and `FIND_ELEMENT_JS` candidate ordering/signatures aligned. If they diverge, `target=e12` may click a different element than the snapshot showed instead of returning `stale_or_not_found`.
 
 ## Change browser launch behavior
 
@@ -73,7 +74,7 @@ Chrome:      http://127.0.0.1:9223
 Zen/Firefox: http://127.0.0.1:9224
 ```
 
-Chrome uses a dedicated profile under `~/.pi/browser-profile`. Zen/Firefox uses the normal profile with BiDi remote debugging flags.
+Chrome uses a dedicated profile under `~/.pi/browser-profile`. Zen/Firefox uses the normal profile with BiDi remote debugging flags, so mutating tool actions must stay guarded by UI confirmation or `PI_BROWSER_REAL_PROFILE_WRITE=1`.
 
 ## Change protocol behavior
 

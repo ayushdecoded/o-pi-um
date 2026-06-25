@@ -10,6 +10,7 @@ import { SubagentParams } from "./schema.ts";
 import { formatParallelRuns, formatRun, renderRunsForUser, shortTask } from "./text.ts";
 import type { SubagentParamsType, ToolDetails } from "./types.ts";
 import { connectPanelEvents, stopPanel } from "./panel.ts";
+import { registerSubagentCommands } from "./commands.ts";
 import { registerModelCommands } from "./model-commands.ts";
 
 export default function registerSubagentExtension(pi: ExtensionAPI): void {
@@ -24,6 +25,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
   connectPanelEvents(pi);
   pi.registerTool(createSubagentTool(pi));
   registerSubagentResultStatus(pi);
+  registerSubagentCommands(pi);
   registerModelCommands(pi);
 
   // Model routing is system-owned here: warn early, but don't block unrelated goal work.
@@ -52,6 +54,8 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
     async execute(_id, params: SubagentParamsType, signal, onUpdate, ctx) {
       const options = params.options ?? {};
       const fanout = params.tasks?.length ? params.tasks : undefined;
+      if (fanout && params.sessionFile?.trim())
+        throw new Error("Use `sessionFile` only with a single follow-up `task`, not with `tasks`.");
       // `tasks` means independent fan-out. Each child gets its own fresh context/session.
       if (fanout) {
         onUpdate?.({

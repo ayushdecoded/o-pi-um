@@ -55,6 +55,7 @@ export interface RunDetails {
   sessionFile?: string;
   startedAt: number;
   completedAt?: number;
+  timedOut?: boolean;
   usage?: RunUsage;
 }
 

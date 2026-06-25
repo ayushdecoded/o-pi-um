@@ -3,6 +3,7 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
 import { parseGoalIntent } from "../domain/intent.ts";
 import {
@@ -14,18 +15,18 @@ import {
   setGoalLabel,
   touchGoal,
 } from "../domain/state.ts";
-import { goalHelpText, showSubagentDetails } from "../ui/overlays.ts";
+import { goalHelpText } from "../ui/overlays.ts";
 import { showGoalStatus, updateGoalUi } from "../ui/status.ts";
-import { goalTurnInProgressReason, runGoalController } from "./controller.ts";
+import {
+  goalTurnInProgressReason,
+  rememberGoalCommandContext,
+  runGoalController,
+} from "./controller.ts";
 
 export function registerGoalCommands(pi: ExtensionAPI): void {
-  pi.registerCommand("agents", {
-    description: "Show active subagent details",
-    handler: async (_args, ctx) => withCommandErrors(ctx, async () => showSubagentDetails(ctx)),
-  });
-
   pi.registerCommand("goal", {
     description: "Start, inspect, pause, resume, or clear a long-running goal",
+    getArgumentCompletions: completeGoalArgs,
     handler: async (args, ctx) =>
       withCommandErrors(ctx, async () => handleGoalCommand(pi, ctx, args.trim())),
   });
@@ -36,6 +37,7 @@ async function handleGoalCommand(
   ctx: ExtensionCommandContext,
   text: string,
 ): Promise<void> {
+  rememberGoalCommandContext(ctx);
   const lower = text.toLowerCase();
   const goal = readGoalState(ctx);
 
@@ -124,6 +126,15 @@ async function handleGoalCommand(
   updateGoalUi(ctx, next);
   ctx.ui.notify("Goal setup started", "info");
   await runGoalController(pi, ctx);
+}
+
+function completeGoalArgs(prefix: string): AutocompleteItem[] | null {
+  const actions = ["status", "help", "pause", "resume", "clear", "cancel"];
+  const needle = prefix.trim().toLowerCase();
+  const items = actions
+    .filter((action) => action.startsWith(needle))
+    .map((action) => ({ value: action, label: action }));
+  return items.length ? items : null;
 }
 
 async function withCommandErrors(ctx: ExtensionContext, fn: () => Promise<void>): Promise<void> {

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { captureScreenshot, runBrowserAction } from "./actions.ts";
 import { DEFAULT_BROWSER_URL, DEFAULT_ZEN_BROWSER_URL } from "./constants.ts";
 import {
@@ -9,7 +9,7 @@ import {
 } from "./launch.ts";
 import { BrowserParamsSchema } from "./schema.ts";
 import type { BrowserParams } from "./types.ts";
-import { browserUrl, contentText, setBrowserOverride } from "./utils.ts";
+import { browserKind, browserUrl, contentText, setBrowserOverride } from "./utils.ts";
 
 function latestUserMentionsZen(ctx: { sessionManager: { getEntries(): unknown[] } }): boolean {
   // Only inspect the latest user turn so older mentions of "zen" do not stick forever.
@@ -70,6 +70,8 @@ export default function browserBridgeExtension(pi: ExtensionAPI): void {
     },
   });
 
+  pi.on("session_shutdown", () => setBrowserOverride(undefined));
+
   pi.registerTool({
     name: "browser",
     label: "Browser",
@@ -81,14 +83,12 @@ export default function browserBridgeExtension(pi: ExtensionAPI): void {
       "Use action='snapshot' to inspect the page; it returns concise page state and element refs like [e12].",
       "For click/type, prefer target='e12' from snapshot over visible text. CSS escape hatch: target='css:button.submit'.",
       "For open, target is the URL. For press, target is the key. For wait, target is text. For scroll, target can be up/down.",
-      "Browser uses a dedicated Chrome profile by default, but automatically uses Zen/Firefox when the latest user message says zen or Zen is already open.",
+      "Browser uses a dedicated Chrome profile by default; Zen/Firefox real-profile writes require confirmation or PI_BROWSER_REAL_PROFILE_WRITE=1.",
       "Set PI_BROWSER=chrome|zen|firefox to force a browser backend.",
       "Do not use for sensitive account/payment/personal-data/destructive actions unless user explicitly confirms.",
     ],
     parameters: BrowserParamsSchema,
     prepareArguments(args): BrowserParams {
-      // No backward-compatible aliases here: the model-facing API is exactly
-      // action/target/text, which keeps tool-call search space small.
       if (!args || typeof args !== "object" || Array.isArray(args)) return {};
       const input = args as Record<string, unknown>;
       const action = typeof input.action === "string" ? input.action : undefined;
@@ -102,6 +102,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI): void {
     },
     async execute(_toolCallId, params: BrowserParams, _signal, _onUpdate, ctx) {
       params = await applyDeterministicBrowserChoice(params, ctx);
+      await guardRealProfileMutation(params, ctx);
       try {
         // Screenshots need a multimodal result; all other actions return plain text.
         if ((params.action ?? "").toLowerCase() === "screenshot") {
@@ -114,7 +115,6 @@ export default function browserBridgeExtension(pi: ExtensionAPI): void {
             details: { action: params.action ?? "screenshot" },
           };
         }
-        // Action implementations already return a compact post-action state when useful.
         const text = await runBrowserAction(params);
         return { content: [{ type: "text", text }], details: { action: params.action ?? "state" } };
       } catch (error) {
@@ -123,4 +123,22 @@ export default function browserBridgeExtension(pi: ExtensionAPI): void {
       }
     },
   });
+}
+
+async function guardRealProfileMutation(
+  params: BrowserParams,
+  ctx: Pick<ExtensionContext, "hasUI" | "ui">,
+): Promise<void> {
+  const action = (params.action ?? "state").toLowerCase();
+  if (browserKind() === "chrome" || !["open", "click", "type", "press"].includes(action)) return;
+  if (/^(1|true|yes|on)$/i.test(process.env.PI_BROWSER_REAL_PROFILE_WRITE ?? "")) return;
+  if (!ctx.hasUI)
+    throw new Error(
+      `browser ${action} uses the real ${browserKind()} profile; set PI_BROWSER_REAL_PROFILE_WRITE=1 or use Chrome's isolated profile.`,
+    );
+  const ok = await ctx.ui.confirm(
+    `Allow browser ${action} in real ${browserKind()} profile?`,
+    "This may affect logged-in tabs/accounts. Prefer PI_BROWSER=chrome for isolated automation.",
+  );
+  if (!ok) throw new Error(`browser ${action} cancelled for real ${browserKind()} profile.`);
 }

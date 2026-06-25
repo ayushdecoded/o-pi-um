@@ -17,19 +17,23 @@ subagent({
 
 - `task` starts one child Pi session.
 - `tasks` runs independent child sessions in parallel.
-- `sessionFile` plus `task` sends a follow-up to an existing child session.
+- `sessionFile` plus `task` sends a follow-up to an existing child session under `~/.pi/agent/subagent-sessions`.
 - Child sessions live under `~/.pi/agent/subagent-sessions`.
 - Run logs live under `~/.pi/agent/subagent-sessions/runs/<run-id>`.
 - Requires `tmux`.
 - Max active children: 10.
 - Max nesting depth: 2.
 - Results include status, output, session file, input/output token usage, and cost when available.
-- Parent wait timeout defaults to 10 minutes; set `timeout` in minutes, `timeout: -1` to wait indefinitely, or `PI_SUBAGENT_TIMEOUT_MINUTES` globally.
+- Parent wait timeout defaults to 10 minutes; set `timeout` in minutes, `timeout: -1` to wait indefinitely, or `PI_SUBAGENT_TIMEOUT_MINUTES` globally. Timed-out children keep running in tmux and count as active until they exit.
+
+## Commands
+
+- `/agents` shows active subagent details.
 
 ## Model routes
 
-- `/models` validates `.pi/MODELS.md`.
-- `/models setup` drafts `.pi/MODELS.md`.
+- `/models` or `/models status` validates `.pi/MODELS.md`.
+- `/models setup` drafts `.pi/MODELS.md` (`setup`, `bootstrap`, and `status` autocomplete).
 - `model` may be an exact `provider/id` or a `.pi/MODELS.md` section name.
 
 ## Code layout

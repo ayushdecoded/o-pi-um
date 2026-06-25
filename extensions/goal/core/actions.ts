@@ -132,7 +132,10 @@ export function createGoalActions(pi: ExtensionAPI) {
         true,
       );
 
-    const existingNames = new Set(currentTasks(goal).map((item) => item.name.toLowerCase()));
+    const existingTasks = new Map(
+      currentTasks(goal).map((item) => [item.name.toLowerCase(), item]),
+    );
+    const existingNames = new Set(existingTasks.keys());
     const newNames = new Set(
       updates.map((item) => item.name!.toLowerCase()).filter((item) => !existingNames.has(item)),
     );
@@ -140,14 +143,15 @@ export function createGoalActions(pi: ExtensionAPI) {
       return toolResponse(`Each goal slice can track at most ${MAX_SLICE_TASKS} tasks.`, true);
     }
     for (const update of updates) {
-      if (
-        !existingNames.has(update.name!.toLowerCase()) &&
-        (!update.objective || !update.verification)
-      ) {
+      const key = update.name!.toLowerCase();
+      if (!existingNames.has(key) && (!update.objective || !update.verification)) {
         return toolResponse(
           `New task "${update.name}" needs objective and verification fields.`,
           true,
         );
+      }
+      if (update.completed === true && !update.evidence && !existingTasks.get(key)?.evidence) {
+        return toolResponse(`Completed task "${update.name}" needs evidence.`, true);
       }
     }
 
@@ -199,6 +203,13 @@ export function createGoalActions(pi: ExtensionAPI) {
     if (incomplete.length > 0)
       return toolResponse(
         `Cannot complete goal while current-slice tasks remain incomplete:\n${incomplete.map((item) => `- ${item.name}`).join("\n")}`,
+        true,
+      );
+
+    const missingEvidence = tasks.filter((task) => task.completed && !task.evidence?.trim());
+    if (missingEvidence.length > 0)
+      return toolResponse(
+        `Cannot complete goal while completed tasks lack evidence:\n${missingEvidence.map((item) => `- ${item.name}`).join("\n")}`,
         true,
       );
 
