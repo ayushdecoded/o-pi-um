@@ -16,13 +16,7 @@ export type SubagentOptionsType = {
 };
 
 export type SubagentParamsType = {
-  task?: string;
-  tasks?: Array<{
-    task: string;
-    model?: string;
-    reasoning?: ThinkingLevelType;
-    timeout?: SubagentTimeout;
-  }>;
+  tasks?: string[];
   sessionFile?: string;
   options?: SubagentOptionsType;
 };
@@ -55,6 +49,7 @@ export interface RunDetails {
   sessionFile?: string;
   startedAt: number;
   completedAt?: number;
+  timedOut?: boolean;
   usage?: RunUsage;
 }
 

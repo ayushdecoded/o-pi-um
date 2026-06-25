@@ -3,7 +3,7 @@
 - `core/index.ts` wires the tool, commands, and lightweight hooks.
 - `core/controller.ts` runs the command-context slice loop.
 - `core/actions.ts` implements model tool mutations.
-- `core/commands.ts` implements `/goal` and `/agents`.
+- `core/commands.ts` implements `/goal`.
 - `domain/state.ts` reconstructs and appends branch-local goal snapshots.
 - `domain/types.ts` defines the lean goal/slice state.
 - `prompt/prompts.ts` contains setup, frame, work-order, and summary prompts.

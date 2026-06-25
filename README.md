@@ -1,10 +1,9 @@
 # o-pi-um
 
-Personal Pi extension package.
+Personal Pi package.
 
 ## Extensions
 
-- `skill-commands`: registers slash commands for hidden skills marked `disable-model-invocation: true`.
 - `goal`: durable Goal loop with visible slice work orders, guarded resume, compact rollups, and status UI.
 - `subagent`: tmux-backed child Pi sessions, parallel fan-out, follow-ups by `sessionFile`, and project model routes.
 - `compaction`: routes native Pi compaction through the `.pi/MODELS.md` `Compaction` model.
@@ -16,7 +15,6 @@ Personal Pi extension package.
 
 ```text
 extensions/
-  skill-commands/ hidden skill slash-command bridge
   goal/          goal loop, state, UI, accounting, prompt helpers
   subagent/      tmux-backed child sessions and model routing
   compaction/    routed model selection for native Pi compaction
@@ -25,10 +23,10 @@ extensions/
   web-search/    DuckDuckGo Lite search, page fetching, parsing, formatting
   shared/        small shared primitives
 skills/
-  find-skills/   hidden skill command fixture
+  find-skills/   hidden native Pi skill command
 ```
 
-Each extension owns its tool schema, runtime behavior, and docs. Shared code should stay small and be used only when it removes real duplication.
+Each extension owns its tool schema, runtime behavior, and docs. Package skills are loaded through Pi's native skill system. Shared code should stay small and be used only when it removes real duplication.
 
 ## Development
 
@@ -40,15 +38,15 @@ npm run format
 
 `npm run check` runs typecheck and format check.
 
-## Hidden skill commands
+## Hidden skills
 
-`skill-commands` scans Pi skill locations, including package-local `skills/`, for skills with:
+Package skills are declared in `package.json` and loaded by Pi's native skill system. Skills marked:
 
 ```yaml
 disable-model-invocation: true
 ```
 
-Those skills are hidden from automatic model invocation but become explicit slash commands named after the skill. Command arguments are appended to the injected skill turn as the user request.
+are hidden from automatic model invocation but remain explicitly callable through native `/skill:<name>` commands, for example `/skill:find-skills`.
 
 ## Review scope
 
@@ -58,6 +56,7 @@ Review package source and docs only:
 README.md
 package.json
 extensions/**
+skills/**
 ```
 
 Exclude:

@@ -39,7 +39,7 @@ browser tool
 
 ## Backend choice
 
-Chrome is the fallback backend. Zen/Firefox is selected when the latest user message explicitly contains `zen`, when Zen is already open, when the Zen BiDi endpoint is reachable, or by `PI_BROWSER=zen|firefox`. Use `PI_BROWSER=chrome` to force Chrome.
+Chrome is the fallback backend and uses an isolated profile. Zen/Firefox is selected when the latest user message explicitly contains `zen`, when Zen is already open, when the Zen BiDi endpoint is reachable, or by `PI_BROWSER=zen|firefox`; writes to that real profile are confirmation-gated unless `PI_BROWSER_REAL_PROFILE_WRITE=1` is set. Use `PI_BROWSER=chrome` to force Chrome.
 
 Browser endpoints are internal policy:
 

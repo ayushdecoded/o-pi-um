@@ -30,27 +30,78 @@ import {
 } from "../prompt/prompts.ts";
 import { setGoalUiPhase, updateGoalUi } from "../ui/status.ts";
 
-let runningGoalId: string | null = null;
-let savedCommandCtx: ExtensionCommandContext | null = null;
-let scheduledController = false;
+type GoalRuntime = {
+  commandCtx?: ExtensionCommandContext;
+  generation: number;
+  runningGoalId?: string;
+  scheduled: boolean;
+  shutdown: boolean;
+};
+
+type GoalRuntimeToken = {
+  key: string;
+  generation: number;
+  goalId: string;
+};
+
+const goalRuntimes = new Map<string, GoalRuntime>();
 
 export function rememberGoalCommandContext(ctx: ExtensionCommandContext): void {
-  savedCommandCtx = ctx;
+  const runtime = runtimeFor(ctx);
+  runtime.commandCtx = ctx;
+  runtime.shutdown = false;
 }
 
-export function scheduleGoalController(pi: ExtensionAPI): void {
-  if (runningGoalId || scheduledController || !savedCommandCtx) return;
-  const goal = readGoalState(savedCommandCtx);
+export function markGoalSessionActive(ctx: ExtensionContext): void {
+  runtimeFor(ctx).shutdown = false;
+}
+
+export function resetGoalRuntime(ctx: ExtensionContext): void {
+  const runtime = runtimeFor(ctx);
+  runtime.generation += 1;
+  runtime.commandCtx = undefined;
+  runtime.runningGoalId = undefined;
+  runtime.scheduled = false;
+  runtime.shutdown = true;
+}
+
+export function hasGoalCommandContext(ctx: ExtensionContext): boolean {
+  const key = sessionKey(ctx);
+  const runtime = goalRuntimes.get(key);
+  return Boolean(
+    runtime?.commandCtx &&
+    !runtime.shutdown &&
+    runtime.commandCtx.sessionManager.getSessionId() === ctx.sessionManager.getSessionId(),
+  );
+}
+
+export function scheduleGoalController(pi: ExtensionAPI, eventCtx: ExtensionContext): void {
+  const key = sessionKey(eventCtx);
+  const runtime = goalRuntimes.get(key);
+  const ctx = runtime?.commandCtx;
+  if (!runtime || runtime.shutdown || runtime.runningGoalId || runtime.scheduled || !ctx) return;
+  if (sessionKey(ctx) !== key) {
+    runtime.commandCtx = undefined;
+    return;
+  }
+  const goal = readGoalState(ctx);
   if (!goal || goal.status !== "active" || goal.blockedReason) return;
-  if (goalTurnInProgressReason(savedCommandCtx)) return;
-  scheduledController = true;
-  void waitForAgentToStop(savedCommandCtx)
-    .then(() => runGoalController(pi, savedCommandCtx!))
-    .catch((error: unknown) =>
-      savedCommandCtx?.ui.notify(`Goal auto-run failed: ${errorMessage(error)}`, "warning"),
-    )
+  if (goalTurnInProgressReason(ctx)) return;
+
+  const generation = runtime.generation;
+  runtime.scheduled = true;
+  void waitForAgentToStop(ctx)
+    .then(async () => {
+      if (!isRuntimeGenerationCurrent(key, generation)) return;
+      await runGoalController(pi, ctx);
+    })
+    .catch((error: unknown) => {
+      if (isRuntimeGenerationCurrent(key, generation))
+        ctx.ui.notify(`Goal auto-run failed: ${errorMessage(error)}`, "warning");
+    })
     .finally(() => {
-      scheduledController = false;
+      const current = goalRuntimes.get(key);
+      if (current?.generation === generation) current.scheduled = false;
     });
 }
 
@@ -59,13 +110,15 @@ export async function runGoalController(
   ctx: ExtensionCommandContext,
 ): Promise<void> {
   rememberGoalCommandContext(ctx);
+  const key = sessionKey(ctx);
+  const runtime = runtimeFor(ctx);
   const initial = readGoalState(ctx);
   if (!initial) {
     ctx.ui.notify("No active Goal. Start one with /goal <intent>.", "warning");
     return;
   }
-  if (runningGoalId) {
-    ctx.ui.notify("Goal controller is already running.", "warning");
+  if (runtime.runningGoalId) {
+    ctx.ui.notify("Goal controller is already running for this session.", "warning");
     return;
   }
   const inProgress = goalTurnInProgressReason(ctx);
@@ -76,29 +129,36 @@ export async function runGoalController(
     );
     return;
   }
-  runningGoalId = initial.id;
+
+  const token = { key, generation: runtime.generation, goalId: initial.id };
+  runtime.runningGoalId = initial.id;
   try {
-    await runControllerUnlocked(pi, ctx);
+    await runControllerUnlocked(pi, ctx, token);
   } finally {
-    setGoalUiPhase(initial.id);
-    runningGoalId = null;
+    if (isRuntimeCurrent(token, ctx)) setGoalUiPhase(initial.id);
+    const current = goalRuntimes.get(key);
+    if (current?.generation === token.generation && current.runningGoalId === initial.id) {
+      current.runningGoalId = undefined;
+    }
   }
 }
 
 async function runControllerUnlocked(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
+  token: GoalRuntimeToken,
 ): Promise<void> {
   for (;;) {
-    let goal = readGoalState(ctx);
-    updateGoalUi(ctx, goal);
+    let goal = readCurrentGoal(ctx, token);
     if (!goal) return;
+    updateGoalUi(ctx, goal);
 
     if (goal.status === "setup") {
-      await runSetupTurn(pi, ctx, goal);
-      goal = readGoalState(ctx);
+      if (!(await runSetupTurn(pi, ctx, goal, token))) return;
+      goal = readCurrentGoal(ctx, token);
+      if (!goal) return;
       updateGoalUi(ctx, goal);
-      if (!goal || goal.status === "setup") {
+      if (goal.status === "setup") {
         ctx.ui.notify("Goal setup is waiting for your answer.", "info");
         return;
       }
@@ -116,28 +176,29 @@ async function runControllerUnlocked(
     }
     if (!isApprovedActiveGoal(goal)) return;
 
-    goal = ensureSliceStarted(pi, ctx, goal);
+    goal = ensureSliceStarted(pi, ctx, goal, token);
+    if (!goal) return;
     if (shouldRollUpSlice(goal)) {
-      await rollUpSlice(pi, ctx, goal);
+      await rollUpSlice(pi, ctx, goal, token);
       continue;
     }
 
     const beforeFingerprint = sliceFingerprint(goal);
-    await runSliceTurn(pi, ctx, goal);
+    if (!(await runSliceTurn(pi, ctx, goal, token))) return;
 
-    const afterTurn = readGoalState(ctx);
+    const afterTurn = readCurrentGoal(ctx, token);
     if (!afterTurn) return;
     if (shouldRollUpSlice(afterTurn)) {
-      await rollUpSlice(pi, ctx, afterTurn);
+      await rollUpSlice(pi, ctx, afterTurn, token);
       continue;
     }
     if (afterTurn.status === "active" && !afterTurn.blockedReason) {
       if (currentTasks(afterTurn).length === 0) {
-        pauseGoal(pi, ctx, afterTurn, "Slice produced no tracked tasks.");
+        pauseGoal(pi, ctx, afterTurn, "Slice produced no tracked tasks.", token);
         return;
       }
       if (sliceFingerprint(afterTurn) === beforeFingerprint) {
-        pauseGoal(pi, ctx, afterTurn, "Slice made no durable task progress.");
+        pauseGoal(pi, ctx, afterTurn, "Slice made no durable task progress.", token);
         return;
       }
     }
@@ -148,8 +209,9 @@ async function runSetupTurn(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   goal: GoalState,
-): Promise<void> {
-  await sendVisibleTurn(pi, ctx, GOAL_SETUP_MESSAGE_TYPE, setupPrompt(goal), {
+  token: GoalRuntimeToken,
+): Promise<boolean> {
+  return sendVisibleTurn(pi, ctx, GOAL_SETUP_MESSAGE_TYPE, setupPrompt(goal), token, {
     goalId: goal.id,
     phase: "setup",
     title: "◇ Setup",
@@ -161,8 +223,10 @@ function ensureSliceStarted(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   goal: GoalState,
-): GoalState {
+  token: GoalRuntimeToken,
+): GoalState | null {
   if (goal.currentSlice?.startEntryId) return goal;
+  if (!isRuntimeCurrent(token, ctx)) return null;
 
   goal.sliceCounter += 1;
   const plan = takeNextSlicePlan(goal);
@@ -179,6 +243,7 @@ function ensureSliceStarted(
     tasks: createSliceTasks(plan, objective),
   };
   const entryId = appendGoalState(pi, ctx, "slice-start", goal);
+  if (!isRuntimeCurrent(token, ctx)) return null;
   goal.currentSlice.startEntryId = entryId;
   setGoalUiPhase(goal.id);
   setGoalLabel(pi, entryId, sliceTreeLabel(goal, "start"));
@@ -190,9 +255,10 @@ async function runSliceTurn(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   goal: GoalState,
-): Promise<void> {
+  token: GoalRuntimeToken,
+): Promise<boolean> {
   const slice = goal.currentSlice;
-  await sendVisibleTurn(pi, ctx, GOAL_WORK_ORDER_MESSAGE_TYPE, sliceWorkOrderPrompt(goal), {
+  return sendVisibleTurn(pi, ctx, GOAL_WORK_ORDER_MESSAGE_TYPE, sliceWorkOrderPrompt(goal), token, {
     goalId: goal.id,
     phase: "slice",
     sliceId: slice?.id,
@@ -213,7 +279,9 @@ function pauseGoal(
   ctx: ExtensionCommandContext,
   goal: GoalState,
   detail: string,
+  token: GoalRuntimeToken,
 ): void {
+  if (!isRuntimeCurrent(token, ctx)) return;
   goal.status = "paused";
   goal.blockedReason = "waiting_on_user";
   goal.blockedDetail = detail;
@@ -237,9 +305,10 @@ async function rollUpSlice(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   goal: GoalState,
+  token: GoalRuntimeToken,
 ): Promise<GoalState> {
   const slice = goal.currentSlice;
-  if (!slice?.startEntryId) return goal;
+  if (!slice?.startEntryId || !isRuntimeCurrent(token, ctx)) return goal;
 
   setGoalUiPhase(
     goal.id,
@@ -264,7 +333,8 @@ async function rollUpSlice(
     customInstructions: sliceSummaryInstructions(goal),
     label: sliceTreeLabel(goal, "done"),
   });
-  await waitForAgentToStop(ctx);
+  await waitForAgentToStop(ctx, token);
+  if (!isRuntimeCurrent(token, ctx)) return goal;
   if (result.cancelled) {
     setGoalUiPhase(goal.id);
     goal.status = "paused";
@@ -285,6 +355,7 @@ async function rollUpSlice(
   goal.completeAfterCurrentSlice = undefined;
   touchGoal(goal);
   appendGoalState(pi, ctx, "slice-rolled-up", goal);
+  if (!isRuntimeCurrent(token, ctx)) return goal;
   if (completeAfterRollup) {
     goal.status = "complete";
     goal.completedAt = nowSeconds();
@@ -304,14 +375,18 @@ async function sendVisibleTurn(
   ctx: ExtensionCommandContext,
   customType: string,
   content: string,
+  token: GoalRuntimeToken,
   details: Record<string, unknown>,
-): Promise<void> {
-  if (!ctx.isIdle() || ctx.hasPendingMessages()) await waitForAgentToStop(ctx);
+): Promise<boolean> {
+  if (!isRuntimeCurrent(token, ctx)) return false;
+  if (!ctx.isIdle() || ctx.hasPendingMessages()) await waitForAgentToStop(ctx, token);
+  if (!isRuntimeCurrent(token, ctx)) return false;
   pi.sendMessage(
     { customType, content, display: true, details },
     { triggerTurn: true, deliverAs: "followUp" },
   );
-  if (await waitForAgentToStart(ctx)) await waitForAgentToStop(ctx);
+  if (await waitForAgentToStart(ctx, token)) await waitForAgentToStop(ctx, token);
+  return isRuntimeCurrent(token, ctx);
 }
 
 function summaryEntryIdFromNavigateResult(result: { cancelled: boolean }): string | undefined {
@@ -344,6 +419,37 @@ export function goalTurnInProgressReason(ctx: ExtensionContext): string | null {
   return null;
 }
 
+function readCurrentGoal(ctx: ExtensionCommandContext, token: GoalRuntimeToken): GoalState | null {
+  if (!isRuntimeCurrent(token, ctx)) return null;
+  const goal = readGoalState(ctx);
+  if (goal && goal.id !== token.goalId) return null;
+  return goal;
+}
+
+function isRuntimeCurrent(token: GoalRuntimeToken, ctx?: ExtensionContext): boolean {
+  if (ctx && sessionKey(ctx) !== token.key) return false;
+  return isRuntimeGenerationCurrent(token.key, token.generation);
+}
+
+function isRuntimeGenerationCurrent(key: string, generation: number): boolean {
+  const runtime = goalRuntimes.get(key);
+  return Boolean(runtime && !runtime.shutdown && runtime.generation === generation);
+}
+
+function runtimeFor(ctx: ExtensionContext): GoalRuntime {
+  const key = sessionKey(ctx);
+  let runtime = goalRuntimes.get(key);
+  if (!runtime) {
+    runtime = { generation: 0, scheduled: false, shutdown: false };
+    goalRuntimes.set(key, runtime);
+  }
+  return runtime;
+}
+
+function sessionKey(ctx: ExtensionContext): string {
+  return ctx.sessionManager.getSessionFile() ?? ctx.sessionManager.getSessionId();
+}
+
 function sliceTreeLabel(goal: GoalState, suffix: "start" | "done"): string {
   const slice = goal.currentSlice;
   const status = suffix === "done" ? "✓" : "●";
@@ -360,16 +466,21 @@ function slug(value: string): string {
     .slice(0, 48);
 }
 
-async function waitForAgentToStart(ctx: ExtensionCommandContext): Promise<boolean> {
+async function waitForAgentToStart(
+  ctx: ExtensionContext,
+  token?: GoalRuntimeToken,
+): Promise<boolean> {
   for (let i = 0; i < 200; i += 1) {
+    if (token && !isRuntimeCurrent(token, ctx)) return false;
     if (!ctx.isIdle()) return true;
     await delay(25);
   }
   return false;
 }
 
-async function waitForAgentToStop(ctx: ExtensionCommandContext): Promise<void> {
+async function waitForAgentToStop(ctx: ExtensionContext, token?: GoalRuntimeToken): Promise<void> {
   for (let i = 0; i < 24_000; i += 1) {
+    if (token && !isRuntimeCurrent(token, ctx)) return;
     if (ctx.isIdle() && !ctx.hasPendingMessages()) return;
     await delay(25);
   }

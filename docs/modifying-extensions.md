@@ -1,6 +1,6 @@
 # Modifying extensions
 
-Keep extensions small, explicit, and easy for models to use.
+Keep extensions and package skills small, explicit, and easy for models to use.
 
 ## Principles
 
@@ -20,9 +20,10 @@ footer      TUI footer usage/status display
 browser     local browser automation
 web_search  search, fetch, parse, Markdown formatting
 shared      small cross-extension primitives
+skills      native Pi skills loaded through the package manifest
 ```
 
-Do not move behavior into `shared/` unless at least two extensions need the same primitive.
+Do not move behavior into `shared/` unless at least two extensions need the same primitive. Prefer Pi-native skills over custom skill-command bridges.
 
 ## Public APIs
 
@@ -64,6 +65,7 @@ README.md
 package.json
 docs/**
 extensions/**
+skills/**
 ```
 
 Exclude generated or external files:

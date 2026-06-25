@@ -1,11 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { REQUIRED_MODEL_SECTIONS, validateModelsMd } from "./models.ts";
 
 export function registerModelCommands(pi: ExtensionAPI): void {
   pi.registerCommand("models", {
     description: "Inspect or bootstrap project model routes in .pi/MODELS.md",
+    getArgumentCompletions: completeModelsArgs,
     handler: async (args, ctx) =>
       withCommandErrors(ctx, async () => {
         const action = args.trim().toLowerCase();
@@ -16,6 +18,14 @@ export function registerModelCommands(pi: ExtensionAPI): void {
         showModelsStatus(ctx);
       }),
   });
+}
+
+function completeModelsArgs(prefix: string): AutocompleteItem[] | null {
+  const actions = ["status", "setup", "bootstrap"];
+  const items = actions
+    .filter((action) => action.startsWith(prefix.trim().toLowerCase()))
+    .map((action) => ({ value: action, label: action }));
+  return items.length ? items : null;
 }
 
 function showModelsStatus(ctx: ExtensionContext): void {

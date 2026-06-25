@@ -46,6 +46,8 @@ For typing:
 { "action": "type", "target": "e2", "text": "hello" }
 ```
 
+Refs are snapshot-bound. If the page changes or the ref no longer matches, click/type returns `stale_or_not_found`; take a fresh snapshot and retry with a fresh ref.
+
 ## Escape hatch
 
 Prefer refs. Use CSS only when snapshot refs are insufficient:
@@ -57,3 +59,5 @@ Prefer refs. Use CSS only when snapshot refs are insufficient:
 ## Hidden policy
 
 The model cannot set browser URL, timeout, tab id, max output, selector, scroll amount, or backend through tool params. Those are internal defaults/env policy.
+
+Chrome uses an isolated automation profile. Zen/Firefox use the real profile, so `open`, `click`, `type`, and `press` require UI confirmation or `PI_BROWSER_REAL_PROFILE_WRITE=1`.

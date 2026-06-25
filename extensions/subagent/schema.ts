@@ -12,31 +12,23 @@ const ThinkingLevel = Type.Union([
 
 const TimeoutOption = Type.Number({ description: "Timeout minutes; -1 disables." });
 
-const SubagentTask = Type.Object({
-  task: Type.String({ description: "Instruction." }),
-  model: Type.Optional(Type.String({ description: "Model/route." })),
-  reasoning: Type.Optional(ThinkingLevel),
-  timeout: Type.Optional(TimeoutOption),
-});
-
 const SubagentOptions = Type.Object({
   model: Type.Optional(Type.String({ description: "Default model/route." })),
   reasoning: Type.Optional(ThinkingLevel),
   timeout: Type.Optional(TimeoutOption),
 });
 
-// Model-facing API stays intentionally small: solo task, parallel tasks, or follow-up by sessionFile.
+// One task list covers solo, parallel fan-out, and single-message follow-ups.
 export const SubagentParams = Type.Object({
-  task: Type.Optional(
-    Type.String({
-      description: "Solo instruction. With sessionFile, this is the follow-up instruction.",
+  tasks: Type.Optional(
+    Type.Array(Type.String({ description: "Instruction." }), {
+      minItems: 1,
+      maxItems: MAX_ACTIVE,
+      description: "One task for solo/follow-up, multiple for parallel jobs.",
     }),
   ),
-  tasks: Type.Optional(
-    Type.Array(SubagentTask, { minItems: 1, maxItems: MAX_ACTIVE, description: "Parallel jobs." }),
-  ),
   sessionFile: Type.Optional(
-    Type.String({ description: "Existing child session file for a follow-up. Use with task." }),
+    Type.String({ description: "Existing child session file for a single-task follow-up." }),
   ),
   options: Type.Optional(SubagentOptions),
 });

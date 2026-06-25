@@ -10,6 +10,7 @@ import { SubagentParams } from "./schema.ts";
 import { formatParallelRuns, formatRun, renderRunsForUser, shortTask } from "./text.ts";
 import type { SubagentParamsType, ToolDetails } from "./types.ts";
 import { connectPanelEvents, stopPanel } from "./panel.ts";
+import { registerSubagentCommands } from "./commands.ts";
 import { registerModelCommands } from "./model-commands.ts";
 
 export default function registerSubagentExtension(pi: ExtensionAPI): void {
@@ -24,6 +25,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
   connectPanelEvents(pi);
   pi.registerTool(createSubagentTool(pi));
   registerSubagentResultStatus(pi);
+  registerSubagentCommands(pi);
   registerModelCommands(pi);
 
   // Model routing is system-owned here: warn early, but don't block unrelated goal work.
@@ -47,45 +49,20 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
     name: "subagent",
     label: "Subagent",
     description:
-      "Spawn child Pi sessions, run parallel child jobs, or follow up with an existing child session via sessionFile.",
+      "Spawn child Pi sessions from tasks, run them in parallel, or follow up with an existing child session via sessionFile.",
     parameters: SubagentParams,
     async execute(_id, params: SubagentParamsType, signal, onUpdate, ctx) {
       const options = params.options ?? {};
-      const fanout = params.tasks?.length ? params.tasks : undefined;
-      // `tasks` means independent fan-out. Each child gets its own fresh context/session.
-      if (fanout) {
-        onUpdate?.({
-          content: [
-            {
-              type: "text",
-              text: `Running ${fanout.length} subagents in parallel. Results will be returned when all finish.`,
-            },
-          ],
-          details: { runs: [] },
-        });
-        const runs = await runParallelSubagents(
-          {
-            tasks: fanout,
-            model: options.model,
-            reasoning: options.reasoning,
-            timeout: options.timeout,
-          },
-          ctx,
-          signal,
-        );
-        return {
-          content: [{ type: "text", text: formatParallelRuns(runs) }],
-          details: { runs },
-        };
-      }
+      const tasks = params.tasks?.map((task) => task.trim()).filter(Boolean) ?? [];
+      if (tasks.length === 0) throw new Error("Provide `tasks` with at least one instruction.");
+      if (params.sessionFile?.trim() && tasks.length !== 1)
+        throw new Error("Use `sessionFile` only with exactly one follow-up task.");
       // `sessionFile` means continue an existing child instead of spawning a related duplicate.
       if (params.sessionFile?.trim()) {
-        if (!params.task?.trim())
-          throw new Error("Provide `task` with `sessionFile` for a subagent follow-up.");
         const run = await messageSubagentSession(
           {
             sessionFile: params.sessionFile,
-            message: params.task,
+            message: tasks[0],
             model: options.model,
             reasoning: options.reasoning,
             timeout: options.timeout,
@@ -98,14 +75,35 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
           details: { runs: [run] },
         };
       }
-      if (!params.task?.trim())
-        throw new Error(
-          "Provide `task` for one subagent, `tasks` for parallel subagents, or `task` + `sessionFile` for a follow-up.",
+      // Multiple tasks fan out; one task is the solo path.
+      if (tasks.length > 1) {
+        onUpdate?.({
+          content: [
+            {
+              type: "text",
+              text: `Running ${tasks.length} subagents in parallel. Results will be returned when all finish.`,
+            },
+          ],
+          details: { runs: [] },
+        });
+        const runs = await runParallelSubagents(
+          {
+            tasks,
+            model: options.model,
+            reasoning: options.reasoning,
+            timeout: options.timeout,
+          },
+          ctx,
+          signal,
         );
-      // Solo path: one child session for one narrow task.
+        return {
+          content: [{ type: "text", text: formatParallelRuns(runs) }],
+          details: { runs },
+        };
+      }
       const route = resolveModelRoute(ctx, options.model, options.reasoning);
       const run = await runPiSubagent(
-        { task: params.task, ...route, timeout: options.timeout },
+        { task: tasks[0], ...route, timeout: options.timeout },
         ctx,
         signal,
       );
@@ -125,11 +123,13 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
       };
     },
     renderCall(args, theme) {
-      const action = args.tasks?.length
-        ? `${args.tasks.length} parallel jobs`
-        : args.sessionFile
-          ? `follow-up: ${args.task ?? ""}`
-          : (args.task ?? "");
+      const taskCount = args.tasks?.length ?? 0;
+      const action =
+        taskCount > 1
+          ? `${taskCount} parallel jobs`
+          : args.sessionFile
+            ? `follow-up: ${args.tasks?.[0] ?? ""}`
+            : (args.tasks?.[0] ?? "");
       return new Text(
         `${theme.fg("toolTitle", theme.bold("subagent"))}: ${theme.fg("accent", shortTask(action))}`,
         0,

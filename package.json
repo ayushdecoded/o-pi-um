@@ -2,7 +2,7 @@
   "name": "o-pi-um",
   "version": "0.1.0",
   "private": true,
-  "description": "A Pi extension package with goal loops, subagents, compaction routing, browser automation, web search, and a compact footer.",
+  "description": "A Pi package with goal loops, subagents, compaction routing, browser automation, web search, a compact footer, and hidden skills.",
   "keywords": [
     "pi-package"
   ],
@@ -21,13 +21,15 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/skill-commands/index.ts",
       "./extensions/goal/index.ts",
       "./extensions/subagent/index.ts",
       "./extensions/compaction/index.ts",
       "./extensions/footer/index.ts",
       "./extensions/browser/index.ts",
       "./extensions/web-search/index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "devDependencies": {

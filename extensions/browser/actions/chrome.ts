@@ -108,7 +108,7 @@ async function actionClick(params: BrowserParams): Promise<string> {
       `(() => {
 			${FIND_ELEMENT_JS}
 			const el = __piFindElement(${jsString(targetRef(params))}, ${jsString(targetText(params))}, ${jsString(targetSelector(params))}, false);
-			if (!el) return { ok: false, message: 'not_found: no matching clickable element. Call snapshot and retry with a ref like e12.' };
+			if (!el) return { ok: false, message: 'stale_or_not_found: target no longer matches the page. Call snapshot and retry with a fresh ref like e12.' };
 			const label = __piLabelFor(el).replace(/\s+/g, ' ').trim();
 			el.scrollIntoView({ block: 'center', inline: 'center' });
 			el.click();
@@ -134,7 +134,7 @@ async function actionType(params: BrowserParams): Promise<string> {
       `(() => {
 			${FIND_ELEMENT_JS}
 			const el = __piFindElement(${jsString(targetRef(params))}, ${jsString(targetText(params))}, ${jsString(targetSelector(params))}, true);
-			if (!el) return { ok: false, message: 'not_found: no matching input field. Call snapshot and retry with a ref like e12.' };
+			if (!el) return { ok: false, message: 'stale_or_not_found: input target no longer matches the page. Call snapshot and retry with a fresh ref like e12.' };
 			const label = __piLabelFor(el).replace(/\s+/g, ' ').trim();
 			el.scrollIntoView({ block: 'center', inline: 'center' });
 			el.focus();

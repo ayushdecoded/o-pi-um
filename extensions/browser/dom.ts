@@ -82,22 +82,26 @@ export function snapshotExpression(
       .filter(el => !el.closest('[aria-hidden="true"]'));
     const seen = new Set();
     const elements = [];
+    const refs = {};
     for (const el of candidates) {
       const role = roleOf(el);
       const name = labelFor(el);
+      const selector = selectorFor(el);
       // De-dupe repeated framework wrappers so one visible control usually becomes one ref.
-      const key = role + '|' + name + '|' + (el.href || '') + '|' + selectorFor(el);
+      const key = role + '|' + name + '|' + (el.href || '') + '|' + selector;
       if (seen.has(key)) continue;
       seen.add(key);
       const rect = el.getBoundingClientRect();
+      const ref = 'e' + (elements.length + 1);
+      refs[ref] = key + '|' + Math.round(rect.x) + ',' + Math.round(rect.y) + ',' + Math.round(rect.width) + ',' + Math.round(rect.height);
       elements.push({
-        ref: 'e' + (elements.length + 1),
+        ref,
         role,
         name: name || role,
         tag: el.tagName.toLowerCase(),
         value: 'value' in el ? String(el.value || '').slice(0, 120) : '',
         href: el.href || '',
-        selector: selectorFor(el),
+        selector,
         disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true'),
         selected: Boolean(el.checked || el.selected || el.getAttribute('aria-selected') === 'true'),
         bounds: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
@@ -108,6 +112,7 @@ export function snapshotExpression(
       .map(h => ({ level: Number(h.tagName.slice(1)), text: norm(h.innerText) })).filter(h => h.text);
     const text = norm(document.body?.innerText || '').slice(0, textLimit);
     const active = document.activeElement && document.activeElement !== document.body ? labelFor(document.activeElement) : '';
+    window.__piSnapshotRefs = refs;
     return { title: document.title, url: location.href, text, headings, elements, focused: active };
   })()`;
 }
@@ -121,31 +126,74 @@ function __piVisible(el) {
   return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
 }
 function __piNorm(s) { return String(s || '').replace(/\\s+/g, ' ').trim().toLowerCase(); }
+function __piRoleOf(el) {
+  const explicit = el.getAttribute('role');
+  if (explicit) return explicit;
+  const tag = el.tagName.toLowerCase();
+  const type = (el.getAttribute('type') || '').toLowerCase();
+  if (tag === 'a') return 'link';
+  if (tag === 'button') return 'button';
+  if (tag === 'textarea') return 'textbox';
+  if (tag === 'select') return 'combobox';
+  if (tag === 'input') {
+    if (['button', 'submit', 'reset'].includes(type)) return 'button';
+    if (type === 'checkbox') return 'checkbox';
+    if (type === 'radio') return 'radio';
+    return 'textbox';
+  }
+  if (el.isContentEditable) return 'textbox';
+  if (tag === 'summary') return 'button';
+  return tag;
+}
+function __piSelectorFor(el) {
+  if (el.id) return '#' + CSS.escape(el.id);
+  const parts = [];
+  for (let cur = el; cur && cur.nodeType === 1 && parts.length < 4; cur = cur.parentElement) {
+    const tag = cur.tagName.toLowerCase();
+    const parent = cur.parentElement;
+    if (!parent) { parts.unshift(tag); break; }
+    const same = Array.from(parent.children).filter(x => x.tagName === cur.tagName);
+    const index = same.indexOf(cur) + 1;
+    parts.unshift(same.length > 1 ? tag + ':nth-of-type(' + index + ')' : tag);
+  }
+  return parts.join(' > ');
+}
 function __piLabelFor(el) {
   const id = el.getAttribute('id');
   const labelledBy = el.getAttribute('aria-labelledby');
-  const byId = labelledBy ? labelledBy.split(/\s+/).map(x => document.getElementById(x)?.innerText || '').join(' ') : '';
+  const byId = labelledBy ? labelledBy.split(/\\s+/).map(x => document.getElementById(x)?.innerText || '').join(' ') : '';
   const label = id ? document.querySelector('label[for="' + CSS.escape(id) + '"]')?.innerText || '' : '';
   return [el.getAttribute('aria-label'), byId, label, el.getAttribute('title'), el.getAttribute('placeholder'), el.getAttribute('name'), el.innerText, el.value].filter(Boolean).join(' ');
 }
+function __piSignature(el) {
+  const rect = el.getBoundingClientRect();
+  const key = __piRoleOf(el) + '|' + __piLabelFor(el).replace(/\\s+/g, ' ').trim() + '|' + (el.href || '') + '|' + __piSelectorFor(el);
+  return key + '|' + Math.round(rect.x) + ',' + Math.round(rect.y) + ',' + Math.round(rect.width) + ',' + Math.round(rect.height);
+}
 function __piCandidates(fieldsOnly) {
-  const tags = fieldsOnly ? 'input, textarea, select, [contenteditable="true"], [role="textbox"]' : 'a,button,input,textarea,select,[role="button"],[role="link"],[tabindex],[contenteditable="true"],summary,label';
+  const tags = fieldsOnly ? 'input,textarea,select,[contenteditable="true"],[role="textbox"]' : 'a[href],button,input,textarea,select,[role],[tabindex],[contenteditable="true"],summary,label';
   const seen = new Set();
   return Array.from(document.querySelectorAll(tags)).filter(__piVisible).filter(el => !el.closest('[aria-hidden="true"]')).filter(el => {
-    const key = el.tagName + '|' + __piNorm(__piLabelFor(el)) + '|' + (el.href || '') + '|' + (el.id || '');
+    const key = __piSignature(el).split('|').slice(0, 4).join('|');
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
+function __piIsField(el) { return el.matches('input,textarea,select,[contenteditable="true"],[role="textbox"]'); }
 function __piFindElement(ref, target, selector, fieldsOnly) {
   // Resolution priority: explicit css: selector, snapshot ref, then fuzzy visible label.
   if (selector) {
     const selected = document.querySelector(selector);
-    if (selected) return selected;
+    if (selected && (!fieldsOnly || __piIsField(selected))) return selected;
+  }
+  if (ref && /^e\\d+$/i.test(ref)) {
+    const el = __piCandidates(false)[Number(ref.slice(1)) - 1];
+    const oldSig = window.__piSnapshotRefs && window.__piSnapshotRefs[ref];
+    if (!el || !oldSig || oldSig !== __piSignature(el) || (fieldsOnly && !__piIsField(el))) return undefined;
+    return el;
   }
   const candidates = __piCandidates(fieldsOnly);
-  if (ref && /^e\d+$/i.test(ref)) return candidates[Number(ref.slice(1)) - 1];
   const q = __piNorm(target);
   if (!q) return document.activeElement && document.activeElement !== document.body ? document.activeElement : candidates[0];
   return candidates.find(el => __piNorm(__piLabelFor(el)) === q)

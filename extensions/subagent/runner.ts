@@ -1,10 +1,9 @@
-import * as fs from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { MAX_ACTIVE, MAX_DEPTH } from "./constants.ts";
+import { MAX_ACTIVE, MAX_DEPTH, SESSION_ROOT } from "./constants.ts";
 import { resolveModelRoute } from "./models.ts";
 import { renderPanel, startPanel } from "./panel.ts";
 import { runPiInTmux } from "./pi-runner.ts";
-import { acquireSlot, activeRuns, releaseSlot } from "./runtime.ts";
+import { acquireSlot, activeRuns, isRuntimeCurrent, releaseSlot } from "./runtime.ts";
 import type {
   FollowupParamsType,
   RunDetails,
@@ -15,17 +14,15 @@ import {
   ensureSessionRoot,
   makeRunId,
   normalizeSessionFile,
+  runPaths,
   sessionFileForRun,
+  isSubagentSessionFile,
 } from "./primitives/session.ts";
+import { tmuxName, waitForStatus } from "./primitives/tmux.ts";
 
 export async function runParallelSubagents(
   params: {
-    tasks: Array<{
-      task: string;
-      model?: string;
-      reasoning?: ThinkingLevelType;
-      timeout?: SubagentTimeout;
-    }>;
+    tasks: string[];
     model?: string;
     reasoning?: ThinkingLevelType;
     timeout?: SubagentTimeout;
@@ -33,20 +30,11 @@ export async function runParallelSubagents(
   ctx: ExtensionContext,
   signal?: AbortSignal,
 ): Promise<RunDetails[]> {
-  const tasks = params.tasks.slice(0, MAX_ACTIVE);
+  const route = resolveModelRoute(ctx, params.model, params.reasoning);
   return Promise.all(
-    tasks.map((task) => {
-      const route = resolveModelRoute(
-        ctx,
-        task.model ?? params.model,
-        task.reasoning ?? params.reasoning,
-      );
-      return runPiSubagent(
-        { task: task.task, ...route, timeout: task.timeout ?? params.timeout },
-        ctx,
-        signal,
-      );
-    }),
+    params.tasks
+      .slice(0, MAX_ACTIVE)
+      .map((task) => runPiSubagent({ task, ...route, timeout: params.timeout }, ctx, signal)),
   );
 }
 
@@ -102,12 +90,12 @@ export async function messageSubagentSession(
   const reasoning = route.reasoning;
   const sessionFile = normalizeSessionFile(params.sessionFile);
   const startedAt = Date.now();
-  if (!fs.existsSync(sessionFile))
+  if (!isSubagentSessionFile(sessionFile))
     return failedRun(
       params.message,
       model,
       sessionFile,
-      `Session file not found: ${sessionFile}`,
+      `Follow-up sessionFile must be an existing subagent session under ${SESSION_ROOT}.`,
       startedAt,
     );
   const id = makeRunId("msg");
@@ -137,16 +125,43 @@ async function withTrackedRun(
   fn: () => Promise<RunDetails>,
 ): Promise<RunDetails> {
   // Scheduling/UI concerns stay outside the Pi runner primitive.
-  await acquireSlot();
+  const token = await acquireSlot();
+  if (!isRuntimeCurrent(token))
+    return failedRun(
+      input.task,
+      input.model,
+      "",
+      "Subagent runtime stopped before launch.",
+      input.startedAt,
+    );
   activeRuns.set(input.id, { ...input, status: "running" });
   startPanel(ctx);
+  let keepActive = false;
   try {
-    return await fn();
+    const run = await fn();
+    keepActive = run.timedOut === true;
+    if (keepActive) monitorTimedOutRun(input.id, token, ctx);
+    return run;
   } finally {
-    activeRuns.delete(input.id);
-    releaseSlot();
-    renderPanel(ctx);
+    if (isRuntimeCurrent(token) && !keepActive) {
+      activeRuns.delete(input.id);
+      releaseSlot(token);
+      renderPanel(ctx);
+    }
   }
+}
+
+function monitorTimedOutRun(
+  id: string,
+  token: Parameters<typeof releaseSlot>[0],
+  ctx: ExtensionContext,
+): void {
+  void waitForStatus(runPaths(id).statusFile, tmuxName(id), undefined, false).finally(() => {
+    if (!isRuntimeCurrent(token)) return;
+    activeRuns.delete(id);
+    releaseSlot(token);
+    renderPanel(ctx);
+  });
 }
 
 function currentDepth(): number {

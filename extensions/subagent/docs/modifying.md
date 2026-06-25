@@ -15,17 +15,17 @@ index.ts
 Current model-facing shapes:
 
 ```ts
-subagent({ task })
-subagent({ tasks: [{ task, model?, reasoning? }] })
-subagent({ sessionFile, task })
-subagent({ options: { model?, reasoning? } })
+subagent({ tasks: [task] })
+subagent({ tasks: [taskA, taskB] })
+subagent({ sessionFile, tasks: [followUpTask] })
+subagent({ options: { model?, reasoning?, timeout? } })
 ```
 
 Rules:
 
-- `task` starts one fresh child session.
-- `tasks` fans out independent fresh child sessions in parallel.
-- `sessionFile + task` follows up an existing child session.
+- one task starts one fresh child session.
+- multiple tasks fan out independent fresh child sessions in parallel.
+- `sessionFile` with exactly one task follows up an existing child session.
 - Do not copy child transcripts into the parent; return `sessionFile` for follow-ups.
 
 ## Execution flow
@@ -78,7 +78,7 @@ The parent wait timeout defaults to 10 minutes:
 PI_SUBAGENT_TIMEOUT_MINUTES=10
 ```
 
-Per-call `timeout` is also in minutes; `timeout: -1` disables the parent wait timeout.
+`options.timeout` is also in minutes; `options.timeout: -1` disables the parent wait timeout.
 
 On timeout the tool returns failure text with:
 
@@ -86,7 +86,7 @@ On timeout the tool returns failure text with:
 tmux attach -t <session>
 ```
 
-Do not kill the tmux session on timeout; keeping it inspectable is intentional. User cancellation does kill the tmux session.
+Do not kill the tmux session on timeout; keeping it inspectable is intentional. Timed-out children keep their active-runtime slot until the tmux run writes its exit status. User cancellation does kill the tmux session.
 
 ## Session files
 
@@ -102,7 +102,7 @@ Fresh child sessions are stored under:
 ~/.pi/agent/subagent-sessions
 ```
 
-Follow-ups normalize the provided `sessionFile` path and reuse it exactly.
+Follow-ups normalize the provided `sessionFile` path and only accept existing top-level subagent child JSONL files under `~/.pi/agent/subagent-sessions`.
 
 ## Model routing
 
@@ -119,6 +119,7 @@ Commands:
 
 ```text
 /models
+/models status
 /models setup
 /models bootstrap
 ```
@@ -181,9 +182,9 @@ npm run check
 Smoke tests:
 
 ```text
-subagent({ task: "say OK" })
-subagent({ tasks: [{ task: "A" }, { task: "B" }] })
-subagent({ sessionFile: "...", task: "what did you say?" })
+subagent({ tasks: ["say OK"] })
+subagent({ tasks: ["A", "B"] })
+subagent({ sessionFile: "...", tasks: ["what did you say?"] })
 ```
 
 For timeout behavior:

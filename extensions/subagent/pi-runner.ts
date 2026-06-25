@@ -69,6 +69,7 @@ export async function runPiInTmux(input: PiRunInput): Promise<RunDetails> {
     output,
     sessionFile: input.sessionFile,
     usage,
+    timedOut,
     ...(exitCode === 0
       ? {}
       : { error: runError(exitCode, stderr, timedOut, input.timeoutMs, tmuxSession) }),
