@@ -22,12 +22,7 @@ import { tmuxName, waitForStatus } from "./primitives/tmux.ts";
 
 export async function runParallelSubagents(
   params: {
-    tasks: Array<{
-      task: string;
-      model?: string;
-      reasoning?: ThinkingLevelType;
-      timeout?: SubagentTimeout;
-    }>;
+    tasks: string[];
     model?: string;
     reasoning?: ThinkingLevelType;
     timeout?: SubagentTimeout;
@@ -35,20 +30,11 @@ export async function runParallelSubagents(
   ctx: ExtensionContext,
   signal?: AbortSignal,
 ): Promise<RunDetails[]> {
-  const tasks = params.tasks.slice(0, MAX_ACTIVE);
+  const route = resolveModelRoute(ctx, params.model, params.reasoning);
   return Promise.all(
-    tasks.map((task) => {
-      const route = resolveModelRoute(
-        ctx,
-        task.model ?? params.model,
-        task.reasoning ?? params.reasoning,
-      );
-      return runPiSubagent(
-        { task: task.task, ...route, timeout: task.timeout ?? params.timeout },
-        ctx,
-        signal,
-      );
-    }),
+    params.tasks
+      .slice(0, MAX_ACTIVE)
+      .map((task) => runPiSubagent({ task, ...route, timeout: params.timeout }, ctx, signal)),
   );
 }
 

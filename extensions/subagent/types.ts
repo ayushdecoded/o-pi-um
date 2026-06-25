@@ -16,13 +16,7 @@ export type SubagentOptionsType = {
 };
 
 export type SubagentParamsType = {
-  task?: string;
-  tasks?: Array<{
-    task: string;
-    model?: string;
-    reasoning?: ThinkingLevelType;
-    timeout?: SubagentTimeout;
-  }>;
+  tasks?: string[];
   sessionFile?: string;
   options?: SubagentOptionsType;
 };
