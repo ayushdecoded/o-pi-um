@@ -5,18 +5,20 @@ import { formatCompactNumber, formatCost } from "../shared/format.ts";
 import { cacheHitRateFromTotals, sessionUsageTotals, type UsageTotals } from "../shared/usage.ts";
 
 export default function registerFooter(pi: ExtensionAPI): void {
+  let requestFooterRender: (() => void) | undefined;
+  const refreshFooter = () => requestFooterRender?.();
+
   pi.on("session_start", (_event, ctx) => {
     if (!ctx.hasUI) return;
 
     ctx.ui.setFooter((tui, theme, footerData) => {
-      const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
-      // Usage changes while streaming; no need to repaint idle sessions on a timer.
-      const interval = setInterval(() => !ctx.isIdle() && tui.requestRender(), 250);
+      requestFooterRender = () => tui.requestRender();
+      const unsubscribe = footerData.onBranchChange(refreshFooter);
 
       return {
         dispose: () => {
           unsubscribe();
-          clearInterval(interval);
+          if (requestFooterRender) requestFooterRender = undefined;
         },
         invalidate() {},
         render(width: number): string[] {
@@ -27,7 +29,7 @@ export default function registerFooter(pi: ExtensionAPI): void {
             branchLabel(branch, theme),
             isSubagent() ? chip("sub", "dim", theme) : "",
             contextLabel(ctx, theme),
-            cacheLabel(active, theme),
+            cacheLabel(ledger, theme),
             activeCostLabel(active, theme),
             ledgerCostLabel(active, ledger, theme),
           ]
@@ -39,6 +41,13 @@ export default function registerFooter(pi: ExtensionAPI): void {
       };
     });
   });
+
+  pi.on("turn_start", refreshFooter);
+  pi.on("tool_execution_start", refreshFooter);
+  pi.on("tool_execution_end", refreshFooter);
+  pi.on("tool_result", refreshFooter);
+  pi.on("turn_end", refreshFooter);
+  pi.on("agent_end", refreshFooter);
 }
 
 function branchLabel(branch: string | undefined, theme: any): string {

@@ -4,9 +4,10 @@ import { activeRuns } from "./runtime.ts";
 import type { ActiveRun } from "./types.ts";
 import { shortTask } from "./text.ts";
 
-let widgetTimer: NodeJS.Timeout | undefined;
 let panelCtx: ExtensionContext | undefined;
 let goalDashboardActive = false;
+let renderedPanel: string | undefined;
+let publishedSnapshot: string | undefined;
 let publishSubagentSnapshot: (runs: ActiveRun[]) => void = () => {};
 
 export function connectPanelEvents(pi: Pick<ExtensionAPI, "events">): void {
@@ -23,7 +24,9 @@ export function connectPanelEvents(pi: Pick<ExtensionAPI, "events">): void {
     });
   };
   pi.events.on("goal-dashboard:active", (data) => {
-    goalDashboardActive = Boolean((data as { active?: unknown }).active);
+    const active = Boolean((data as { active?: unknown }).active);
+    if (active === goalDashboardActive) return;
+    goalDashboardActive = active;
     if (panelCtx?.hasUI) renderPanel(panelCtx);
   });
 }
@@ -34,52 +37,53 @@ export function renderPanel(ctx: ExtensionContext): void {
   const runs = Array.from(activeRuns.values());
   // Publish first so the goal dashboard can render subagent chips instead of a separate widget.
   publishDashboardSubagents(runs);
-  if (runs.length === 0) {
+  if (runs.length === 0 || goalDashboardActive) {
     clearPanel(ctx);
     return;
   }
-  // When goal dashboard is active, it owns the visual surface and reads our published data.
-  if (goalDashboardActive) {
-    ctx.ui.setWidget(WIDGET_KEY, undefined);
-    return;
-  }
-  ctx.ui.setWidget(
-    WIDGET_KEY,
-    [
-      ctx.ui.theme.fg("muted", `subagents · ${runs.length} active`),
-      ...runs.slice(0, 10).map((run) => {
-        const age = Math.max(0, Math.round((Date.now() - run.startedAt) / 1000));
-        const model = run.model ? ` · ${run.model}` : "";
-        return ctx.ui.theme.fg(
-          "dim",
-          `  ${run.id.slice(0, 8)} · ${age}s · ${shortTask(run.task)}${model}`,
-        );
-      }),
-    ],
-    { placement: "aboveEditor" },
-  );
+  const lines = [
+    ctx.ui.theme.fg("muted", `subagents · ${runs.length} active`),
+    ...runs.slice(0, 10).map((run) => {
+      const model = run.model ? ` · ${run.model}` : "";
+      return ctx.ui.theme.fg(
+        "dim",
+        `  ${run.id.slice(0, 8)} · running · ${shortTask(run.task)}${model}`,
+      );
+    }),
+  ];
+  const signature = lines.join("\n");
+  if (signature === renderedPanel) return;
+  ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "aboveEditor" });
+  renderedPanel = signature;
 }
 
 export function startPanel(ctx: ExtensionContext): void {
   renderPanel(ctx);
-  if (!ctx.hasUI || widgetTimer) return;
-  // Refresh age counters while children are running.
-  widgetTimer = setInterval(() => renderPanel(ctx), 1000);
 }
 
 export function stopPanel(ctx?: ExtensionContext): void {
-  if (widgetTimer) clearInterval(widgetTimer);
-  widgetTimer = undefined;
   panelCtx = undefined;
-  if (ctx?.hasUI) ctx.ui.setWidget(WIDGET_KEY, undefined);
+  if (ctx?.hasUI && renderedPanel !== undefined) ctx.ui.setWidget(WIDGET_KEY, undefined);
+  renderedPanel = undefined;
   publishDashboardSubagents([]);
 }
 
 function clearPanel(ctx: ExtensionContext): void {
-  ctx.ui.setWidget(WIDGET_KEY, undefined);
-  stopPanel();
+  if (renderedPanel !== undefined) ctx.ui.setWidget(WIDGET_KEY, undefined);
+  renderedPanel = undefined;
 }
 
 function publishDashboardSubagents(runs: ActiveRun[]): void {
+  const snapshot = JSON.stringify(
+    runs.map((run) => ({
+      id: run.id,
+      task: run.task,
+      model: run.model,
+      startedAt: run.startedAt,
+      status: run.status,
+    })),
+  );
+  if (snapshot === publishedSnapshot) return;
+  publishedSnapshot = snapshot;
   publishSubagentSnapshot(runs);
 }

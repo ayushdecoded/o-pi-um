@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { activeRuns } from "./runtime.ts";
 
 export function registerSubagentCommands(pi: ExtensionAPI): void {
@@ -20,29 +20,29 @@ async function showSubagentDetails(ctx: ExtensionContext): Promise<void> {
     return;
   }
   await ctx.ui.custom<void>(
-    (tui, theme, _keybindings, done) => {
+    (_tui, theme, _keybindings, done) => {
       const bg = (text: string) => theme.bg("customMessageBg", text);
       const pad = (line: string, width: number) => {
-        const clipped = line.replace(/\r/g, "");
+        const clipped = truncateToWidth(line.replace(/\r/g, ""), Math.max(0, width), "");
         return bg(`${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`);
       };
       const border = (w: number) =>
-        bg(theme.fg("accent", `╭${String("─").repeat(Math.max(0, w - 2))}╮`));
+        bg(theme.fg("accent", w <= 1 ? "╭" : `╭${String("─").repeat(Math.max(0, w - 2))}╮`));
       const bottom = (w: number) =>
-        bg(theme.fg("accent", `╰${String("─").repeat(Math.max(0, w - 2))}╯`));
-      const refreshInterval = setInterval(() => tui.requestRender(), 2000);
+        bg(theme.fg("accent", w <= 1 ? "╰" : `╰${String("─").repeat(Math.max(0, w - 2))}╯`));
       const line = (s: string, pw: number) =>
-        pad(`│  ${truncate(s, Math.max(20, pw - 12))}`, pw - 1) + bg(theme.fg("accent", "│"));
+        pad(`│  ${truncateToWidth(s, Math.max(0, pw - 6), "")}`, pw - 1) +
+        bg(theme.fg("accent", "│"));
       return {
         render(width: number) {
-          const pw = Math.max(52, width);
+          const pw = Math.max(1, width);
           const now = Date.now();
           const rows = activeSubagents().map((run) => {
             const dur = Math.max(0, Math.round((now - run.startedAt) / 1000));
             const durStr = dur >= 120 ? `${Math.floor(dur / 60)}m${dur % 60}s` : `${dur}s`;
             return `${run.model ?? "model?"} · ${durStr} · ${run.task}`;
           });
-          const help = theme.fg("dim", "any key to close · auto-refreshes");
+          const help = theme.fg("dim", "any key to close");
           return [
             border(pw),
             line(theme.fg("accent", `Active subagents (${rows.length})`), pw),
@@ -57,7 +57,6 @@ async function showSubagentDetails(ctx: ExtensionContext): Promise<void> {
         invalidate() {},
         handleInput(data: string) {
           if (!data) return;
-          clearInterval(refreshInterval);
           done(undefined);
         },
       };

@@ -1,9 +1,10 @@
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Markdown, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
+import { Markdown, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 import type { GoalState } from "../domain/types.ts";
 import { truncate } from "./format.ts";
+import { goalOwnerLabel } from "./names.ts";
 
 // The only modal approval step: setup contract -> active goal.
 export function goalContractPreviewLines(
@@ -12,8 +13,9 @@ export function goalContractPreviewLines(
   objective: string,
 ): string[] {
   const theme = ctx.ui.theme;
+  const label = goalOwnerLabel(goal);
   return [
-    theme.fg("warning", "◇ Activate Goal contract?") +
+    theme.fg("warning", `◇ Activate ${label} contract?`) +
       theme.fg("dim", " · enter selects Yes, esc cancels"),
     theme.fg("dim", `  Intent: ${truncate(goal.intent, 100)}`),
     ...previewLines(objective, 3).map((line, index) =>
@@ -35,18 +37,18 @@ export async function approveGoalContract(
       const md = new Markdown(markdown, 0, 0, getMarkdownTheme());
       const bg = (text: string) => theme.bg("customMessageBg", text);
       const pad = (line: string, width: number) => {
-        const clipped = line.replace(/\r/g, "");
+        const clipped = truncateToWidth(line.replace(/\r/g, ""), Math.max(0, width), "");
         const padded = `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
         return bg(padded);
       };
       const border = (width: number) =>
-        bg(theme.fg("accent", `╭${"─".repeat(Math.max(0, width - 2))}╮`));
+        bg(theme.fg("accent", width <= 1 ? "╭" : `╭${"─".repeat(Math.max(0, width - 2))}╮`));
       const bottom = (width: number) =>
-        bg(theme.fg("accent", `╰${"─".repeat(Math.max(0, width - 2))}╯`));
+        bg(theme.fg("accent", width <= 1 ? "╰" : `╰${"─".repeat(Math.max(0, width - 2))}╯`));
       return {
         render(width: number) {
-          const panelWidth = Math.max(58, width);
-          const innerWidth = Math.max(36, panelWidth - 8);
+          const panelWidth = Math.max(1, width);
+          const innerWidth = Math.max(1, panelWidth - 8);
           const lines = md.render(innerWidth);
           const maxScroll = Math.max(0, lines.length - previewHeight);
           scroll = Math.min(scroll, maxScroll);
@@ -59,7 +61,7 @@ export async function approveGoalContract(
                   ` showing ${scroll + 1}-${Math.min(lines.length, scroll + previewHeight)} of ${lines.length}`,
                 )
               : "";
-          const title = `${theme.fg("accent", theme.bold("Goal Contract Review"))}${theme.fg("dim", " · setup → active after approval")}${info}`;
+          const title = `${theme.fg("accent", theme.bold(`${goalOwnerLabel(goal)} Contract Review`))}${theme.fg("dim", " · setup → active after approval")}${info}`;
           const help = `${theme.fg("dim", "scroll")} ↑↓ PgUp/PgDn   ${theme.fg("success", theme.bold("approve"))} Y/Enter   ${theme.fg("warning", theme.bold("cancel"))} N/Esc`;
           return [
             border(panelWidth),
@@ -108,7 +110,7 @@ export async function approveGoalContract(
 
 function goalContractMarkdown(goal: GoalState, objective: string): string {
   return [
-    "**Approve only if this matches what you want the autonomous Goal runner to do.**",
+    `**Approve only if this matches what you want the autonomous ${goalOwnerLabel(goal)} runner to do.**`,
     "",
     "## Contract",
     objective,

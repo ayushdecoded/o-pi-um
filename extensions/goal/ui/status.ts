@@ -15,22 +15,25 @@ import {
 } from "../domain/state.ts";
 import type { GoalState } from "../domain/types.ts";
 import { formatElapsed, truncate } from "./format.ts";
+import { goalOwnerLabel } from "./names.ts";
 import { taskSummaryText } from "./text.ts";
 
 type GoalUiPhase = { goalId: string; title: string; detail: string };
 type DashboardSubagentRun = { task?: string; model?: string; startedAt?: number };
 
-let statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
-let refreshCtx: ExtensionContext | undefined;
+let renderCtx: ExtensionContext | undefined;
 let activePhase: GoalUiPhase | null = null;
 let dashboardSubagentRuns: DashboardSubagentRun[] = [];
 let publishDashboardActive: (active: boolean) => void = () => {};
+let dashboardActive = false;
+let renderedStatus: string | undefined;
+let renderedWidget: string | undefined;
 
 export function registerGoalDashboardEvents(pi: Pick<ExtensionAPI, "events">): void {
   publishDashboardActive = (active) => pi.events.emit("goal-dashboard:active", { active });
   pi.events.on("subagent:active", (data) => {
     dashboardSubagentRuns = parseSubagentRuns(data);
-    if (refreshCtx?.hasUI) renderGoalUi(refreshCtx, readGoalState(refreshCtx));
+    if (renderCtx?.hasUI) renderGoalUi(renderCtx, readGoalState(renderCtx));
   });
 }
 
@@ -47,8 +50,6 @@ export function updateGoalUi(ctx: ExtensionContext, goal: GoalState | null): voi
     if (!ctx.hasUI) return;
     renderGoalUi(ctx, goal);
     setDashboardActive(Boolean(goal && goal.status !== "complete"));
-    if (goal && goal.status !== "complete") startStatusRefresh(ctx);
-    else stopStatusRefresh();
   } catch {
     // UI is best-effort.
   }
@@ -62,7 +63,7 @@ export function goalPanelPlaintext(goal: GoalState | null): string {
   if (!goal) return "No active Goal. Start one with /goal <intent>.";
   const tasks = currentTasks(goal);
   return [
-    `Goal: ${goal.status}`,
+    `${goalOwnerLabel(goal)}: ${goal.status}`,
     `Intent: ${goal.intent}`,
     goal.contract ? `Contract: ${goal.contract}` : undefined,
     `Objective: ${activeObjective(goal)}`,
@@ -83,13 +84,27 @@ export function goalPanelPlaintext(goal: GoalState | null): string {
 }
 
 function renderGoalUi(ctx: ExtensionContext, goal: GoalState | null): void {
+  renderCtx = ctx;
   if (!goal) {
-    ctx.ui.setStatus(GOAL_STATUS_KEY, undefined);
-    ctx.ui.setWidget(GOAL_STATUS_KEY, undefined);
+    if (renderedStatus !== undefined) ctx.ui.setStatus(GOAL_STATUS_KEY, undefined);
+    if (renderedWidget !== undefined) ctx.ui.setWidget(GOAL_STATUS_KEY, undefined);
+    renderedStatus = undefined;
+    renderedWidget = undefined;
     return;
   }
-  ctx.ui.setStatus(GOAL_STATUS_KEY, statusLine(ctx, goal));
-  ctx.ui.setWidget(GOAL_STATUS_KEY, goalWidgetLines(ctx, goal), { placement: "aboveEditor" });
+
+  const status = statusLine(ctx, goal);
+  if (status !== renderedStatus) {
+    ctx.ui.setStatus(GOAL_STATUS_KEY, status);
+    renderedStatus = status;
+  }
+
+  const lines = goalWidgetLines(ctx, goal);
+  const widget = lines.join("\n");
+  if (widget !== renderedWidget) {
+    ctx.ui.setWidget(GOAL_STATUS_KEY, lines, { placement: "aboveEditor" });
+    renderedWidget = widget;
+  }
 }
 
 function statusLine(ctx: ExtensionContext, goal: GoalState): string {
@@ -127,7 +142,9 @@ function phaseFor(goal: GoalState): GoalUiPhase | null {
 
 function goalTitle(goal: GoalState): string {
   const slice = goal.currentSlice ? ` · s${goal.currentSlice.id} ${goal.currentSlice.name}` : "";
-  return `${goalMarker(goal)} ${goalVerb(goal)}${slice}`;
+  const owner = goalOwnerLabel(goal);
+  const prefix = owner === "Goal" ? "" : `${owner} `;
+  return `${goalMarker(goal)} ${prefix}${goalVerb(goal)}${slice}`;
 }
 
 function goalMarker(goal: GoalState): string {
@@ -150,30 +167,9 @@ function goalColor(goal: GoalState): "success" | "warning" | "accent" {
   return "accent";
 }
 
-function startStatusRefresh(ctx: ExtensionContext): void {
-  refreshCtx = ctx;
-  setDashboardActive(true);
-  if (statusRefreshTimer) return;
-  statusRefreshTimer = setInterval(() => {
-    try {
-      if (!refreshCtx?.hasUI) return;
-      const goal = readGoalState(refreshCtx);
-      renderGoalUi(refreshCtx, goal);
-      setDashboardActive(Boolean(goal && goal.status !== "complete"));
-      if (!goal || goal.status === "complete") stopStatusRefresh();
-    } catch {
-      // UI refresh is best-effort.
-    }
-  }, 1000);
-}
-
-function stopStatusRefresh(): void {
-  if (statusRefreshTimer) clearInterval(statusRefreshTimer);
-  statusRefreshTimer = undefined;
-  refreshCtx = undefined;
-}
-
 function setDashboardActive(active: boolean): void {
+  if (active === dashboardActive) return;
+  dashboardActive = active;
   publishDashboardActive(active);
 }
 
