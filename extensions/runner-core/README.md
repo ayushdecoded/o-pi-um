@@ -12,6 +12,7 @@ Core manages:
 - task evidence validation
 - pause/resume/complete transitions
 - unit rollup boundaries
+- default command/tool/controller plumbing that runners can override piecemeal
 
 Core does not manage:
 
@@ -55,13 +56,23 @@ A feature defines one `RunnerDefinition`:
 const goalRunner = {
   id: "goal",
   label: "Goal",
-  setup: { prompt: goalSetupPrompt },
-  work: { prompt: goalWorkPrompt },
-  rollup: { enabled: true, prompt: goalRollupPrompt },
+  command: { name: "goal" },
+  tool: { name: "goal" },
+  setupPrompt: goalSetupPrompt,
+  workPrompt: goalWorkPrompt,
+  rollupPrompt: goalRollupPrompt,
   policy: { maxTasksPerUnit: 10 },
 };
 ```
 
 Run entries are compact facts, not full snapshots: created, plan-approved, task-assigned, task-evidence, unit-rolled-up, paused, resumed, completed, cleared.
+
+Customization stays narrow and composable:
+
+- `registerRunner(pi, definition, { command:false })` lets a feature own slash commands while reusing tool/controller state.
+- `command.actions` adds or overrides slash-command actions.
+- `tool.actions` adds model-facing actions.
+- `workflow` swaps scheduler policy decisions.
+- `hooks` attach feature side effects to durable transitions.
 
 RoboPi can remain a thin definition until it has real external behavior. Worktree/GitHub behavior should stay outside core.

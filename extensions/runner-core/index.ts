@@ -1,19 +1,36 @@
-export { registerRunner } from "./registry.ts";
+export { registerRunner, registerRunnerScheduler, type RegisterRunnerOptions } from "./registry.ts";
+export { registerRunnerCommand } from "./command.ts";
+export { scheduleRunnerController, runRunnerController } from "./controller.ts";
+export { registerRunnerTool } from "./tool.ts";
 export { RUNNER_ENTRY_TYPE, appendRunEntry, readRun, type RunEntryInput } from "./store.ts";
 export { RUNNER_SETUP_MESSAGE_TYPE, RUNNER_WORK_MESSAGE_TYPE } from "./constants.ts";
 
 export type {
   CoreResult,
-  PromptInput,
   ReadyWork,
+  RollupPromptInput,
   RunEntry,
   RunEntryKind,
+  RunnerCommandAction,
+  RunnerCommandApi,
+  RunnerCommandConfig,
+  RunnerCommandInput,
   RunnerDefinition,
+  RunnerEntryDraft,
+  RunnerHookInput,
+  RunnerHooks,
   RunnerPolicy,
+  RunnerToolAction,
+  RunnerToolActionInput,
+  RunnerToolConfig,
+  RunnerToolResult,
+  RunnerWorkflow,
   RunState,
   RunStatus,
+  SetupPromptInput,
   UnitSummary,
   WorkPlan,
+  WorkPromptInput,
   WorkTask,
   WorkUnit,
 } from "./types.ts";

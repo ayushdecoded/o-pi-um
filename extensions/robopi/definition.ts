@@ -14,8 +14,8 @@ export const robopiRunner: RunnerDefinition = {
     name: "robopi",
     description: "Approve RoboPi plans and record task evidence.",
   },
-  setup: { prompt: robopiSetupPrompt },
-  work: { prompt: robopiWorkPrompt },
-  rollup: { enabled: true, prompt: robopiRollupPrompt },
+  setupPrompt: robopiSetupPrompt,
+  workPrompt: robopiWorkPrompt,
+  rollupPrompt: robopiRollupPrompt,
   policy: { maxTasksPerUnit: 8 },
 };

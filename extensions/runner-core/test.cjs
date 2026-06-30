@@ -5,15 +5,17 @@ const { createRun, approvePlan, startNextWork, updateTask, rollUpUnit } = jiti("
 const { readRun, RUNNER_ENTRY_TYPE } = jiti("./store.ts");
 const { runStatusText } = jiti("./format.ts");
 const { registerRunnerTool } = jiti("./tool.ts");
+const { registerRunnerCommand } = jiti("./command.ts");
 const { runRunnerController, turnInProgressReason } = jiti("./controller.ts");
+const { Type } = require("typebox");
 
 const definition = {
   id: "goal",
   label: "Goal",
   command: { name: "goal" },
   tool: { name: "goal" },
-  setup: { prompt: () => "" },
-  work: { prompt: () => "" },
+  setupPrompt: () => "",
+  workPrompt: () => "",
   policy: { maxTasksPerUnit: 10 },
 };
 
@@ -187,6 +189,66 @@ function entry(id, kind, runId, data = {}) {
       ctx,
     );
     assert.equal(readRun(ctx, "goal")?.plan.units[0].tasks[0].evidence, "proof");
+  }
+
+  {
+    let command;
+    const messages = [];
+    const pi = {
+      registerCommand(_name, config) {
+        command = config;
+      },
+    };
+    const customDefinition = {
+      ...definition,
+      command: {
+        name: "demo",
+        actions: [
+          {
+            name: "inspect",
+            usage: "inspect <value>",
+            handler(input, api) {
+              api.ctx.ui.notify(`${api.definition.label}:${input.args}`, "info");
+            },
+          },
+        ],
+      },
+    };
+    registerRunnerCommand(pi, customDefinition);
+    await command.handler("inspect value", {
+      ui: { notify: (message) => messages.push(message) },
+      sessionManager: { getSessionFile: () => "session.jsonl", getSessionId: () => "session" },
+    });
+    assert.deepEqual(messages, ["Goal:value"]);
+  }
+
+  {
+    let tool;
+    const pi = {
+      registerTool(config) {
+        tool = config;
+      },
+    };
+    const customDefinition = {
+      ...definition,
+      tool: {
+        name: "goal",
+        actions: [
+          {
+            action: "note",
+            parameters: Type.Object({ action: Type.String(), note: Type.String() }),
+            execute({ params }) {
+              return { content: [{ type: "text", text: `noted:${params.note}` }], details: {} };
+            },
+          },
+        ],
+      },
+    };
+    registerRunnerTool(pi, customDefinition);
+    const result = await tool.execute("call", { action: "note", note: "x" }, undefined, undefined, {
+      sessionManager: { getBranch: () => [] },
+    });
+    assert.equal(result.content[0].text, "noted:x");
   }
 
   {

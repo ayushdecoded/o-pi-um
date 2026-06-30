@@ -6,6 +6,7 @@ import type {
 
 import { RUNNER_SETUP_MESSAGE_TYPE, RUNNER_WORK_MESSAGE_TYPE } from "./constants.ts";
 import { isPlanComplete } from "./graph.ts";
+import { hookInput } from "./hooks.ts";
 import { sendTurn } from "./messages.ts";
 import { completeIfReady, pauseAndAppend, rollUpReadyUnit } from "./rollup.ts";
 import {
@@ -79,7 +80,8 @@ export async function runRunnerController(
 }
 
 // One event wake -> one concrete action: setup packet, task packet, rollup,
-// completion, or pause. No polling and no vague "continue" prompts.
+// completion, or pause. Workflow hooks can swap policy decisions while the core
+// still owns durable state, turn gating, and branch navigation.
 async function controllerStep(
   pi: ExtensionAPI,
   definition: RunnerDefinition,
@@ -91,18 +93,24 @@ async function controllerStep(
   if (run.status === "paused" || run.blockedReason) return notifyPaused(ctx, definition, run);
   if (run.status === "setup") return sendSetupTurn(pi, definition, run);
 
-  if (hasAssignedIncompleteTask(run)) {
-    pauseAndAppend(
-      pi,
-      ctx,
-      run,
-      "no_progress",
-      "The last work turn made no durable task progress.",
-    );
+  const workflow = definition.workflow ?? {};
+  if ((workflow.hasAssignedIncompleteTask ?? hasAssignedIncompleteTask)(run)) {
+    const decision =
+      (await workflow.onNoProgress?.(hookInput(pi, ctx, definition, run))) ?? "pause";
+    if (decision === "pause") {
+      await pauseAndAppend(
+        pi,
+        ctx,
+        run,
+        "no_progress",
+        "The last work turn made no durable task progress.",
+        definition,
+      );
+    }
     return;
   }
 
-  const unit = unitReadyToRollUp(run);
+  const unit = (workflow.unitReadyToRollUp ?? unitReadyToRollUp)(run);
   if (unit) {
     await rollUpReadyUnit(pi, definition, ctx, run, unit, token);
     const afterRollup = readCurrentRun(definition, ctx, token);
@@ -111,28 +119,29 @@ async function controllerStep(
     return;
   }
 
-  if (isPlanComplete(run)) return completeIfReady(pi, definition, ctx, run);
+  if ((workflow.isPlanComplete ?? isPlanComplete)(run))
+    return completeIfReady(pi, definition, ctx, run);
 
-  const started = startNextWork(run);
-  if (!started.ok) return pauseAndAppend(pi, ctx, run, "blocked", started.message);
-  sendWorkTurn(pi, definition, ctx, started.value.run, started.value.work);
+  const started = (workflow.startNextWork ?? startNextWork)(run);
+  if (!started.ok) return pauseAndAppend(pi, ctx, run, "blocked", started.message, definition);
+  await sendWorkTurn(pi, definition, ctx, started.value.run, started.value.work);
 }
 
 function sendSetupTurn(pi: ExtensionAPI, definition: RunnerDefinition, run: RunState): void {
-  sendTurn(pi, RUNNER_SETUP_MESSAGE_TYPE, definition.setup.prompt({ run }), {
+  sendTurn(pi, RUNNER_SETUP_MESSAGE_TYPE, definition.setupPrompt({ run }), {
     runnerId: definition.id,
     runId: run.id,
     phase: "setup",
   });
 }
 
-function sendWorkTurn(
+async function sendWorkTurn(
   pi: ExtensionAPI,
   definition: RunnerDefinition,
   ctx: ExtensionCommandContext,
   run: RunState,
   work: ReadyWork,
-): void {
+): Promise<void> {
   appendRunEntry(pi, ctx, {
     runnerId: definition.id,
     runId: run.id,
@@ -140,10 +149,14 @@ function sendWorkTurn(
     unitId: work.unit.id,
     taskId: work.task.id,
   });
+  await definition.hooks?.onTaskAssigned?.({
+    ...hookInput(pi, ctx, definition, run),
+    work,
+  });
   sendTurn(
     pi,
     RUNNER_WORK_MESSAGE_TYPE,
-    definition.work.prompt({ run, unit: work.unit, task: work.task, summaries: run.summaries }),
+    definition.workPrompt({ run, ...work, summaries: run.summaries }),
     {
       runnerId: definition.id,
       runId: run.id,

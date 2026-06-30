@@ -7,18 +7,23 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
 import { rememberRunnerContext, runRunnerController, turnInProgressReason } from "./controller.ts";
 import { runStatusText } from "./format.ts";
+import { hookInput } from "./hooks.ts";
 import { appendRunEntry, readRun } from "./store.ts";
 import { createRun, pauseRun, resumeRun } from "./transitions.ts";
-import type { RunnerDefinition } from "./types.ts";
+import type {
+  RunnerCommandAction,
+  RunnerCommandApi,
+  RunnerCommandInput,
+  RunnerDefinition,
+  RunState,
+} from "./types.ts";
 
-const DEFAULT_SUBCOMMANDS = ["start", "status", "help", "pause", "resume", "clear", "cancel"];
-
-// Generic slash-command shell. Feature definitions supply only name/label; core
-// provides start/status/pause/resume/clear behavior consistently.
+// Generic slash-command shell. Core provides normal runner actions; features can
+// add or override actions without forking state, scheduling, or rollup behavior.
 export function registerRunnerCommand(pi: ExtensionAPI, definition: RunnerDefinition): void {
   pi.registerCommand(definition.command.name, {
     description: definition.command.description ?? `Start or control ${definition.label}`,
-    getArgumentCompletions: (prefix) => completeArgs(prefix, definition),
+    getArgumentCompletions: (prefix) => completeArgs(definition, prefix),
     handler: async (args, ctx) =>
       withErrors(ctx, definition, () => handleCommand(pi, definition, ctx, args.trim())),
   });
@@ -31,130 +36,188 @@ async function handleCommand(
   text: string,
 ): Promise<void> {
   rememberRunnerContext(definition, ctx);
-  const lower = text.toLowerCase();
-  const run = readRun(ctx, definition.id);
+  const api = commandApi(pi, definition, ctx);
+  const actions = commandActions(definition);
+  const parsed = parseCommandText(text);
+  const action = findAction(actions, parsed.action || "status");
 
-  if (!text || lower === "status") return notifyStatus(ctx, definition, run);
-  if (lower === "help") return void ctx.ui.notify(helpText(definition), "info");
-  if (lower === "pause") return pauseCommand(pi, definition, ctx, run);
-  if (lower === "resume") return resumeCommand(pi, definition, ctx, run);
-  if (lower === "clear" || lower === "cancel") return clearCommand(pi, definition, ctx, run);
-  if (lower.startsWith("start "))
-    return startCommand(pi, definition, ctx, text.slice("start ".length).trim(), run);
-
+  if (action) return void (await action.handler(parsed, api));
   ctx.ui.notify(
     `Unknown ${definition.label} command. Use /${definition.command.name} help.`,
     "warning",
   );
 }
 
-// Starting a run only creates setup state and sends the setup packet. No work is
-// allowed until the model submits an approved plan through the tool.
-async function startCommand(
-  pi: ExtensionAPI,
-  definition: RunnerDefinition,
-  ctx: ExtensionCommandContext,
-  intent: string,
-  existing: ReturnType<typeof readRun>,
-): Promise<void> {
-  if (!intent)
-    return void ctx.ui.notify(`Usage: /${definition.command.name} start <intent>`, "warning");
-  if (existing && existing.status !== "complete") {
-    const ok =
-      !ctx.hasUI || (await ctx.ui.confirm(`Replace current ${definition.label}?`, existing.intent));
-    if (!ok) return;
-    appendRunEntry(pi, ctx, { runnerId: definition.id, runId: existing.id, kind: "cleared" });
-  }
-
-  const run = createRun(definition, intent);
-  appendRunEntry(pi, ctx, {
-    runnerId: definition.id,
-    runId: run.id,
-    kind: "created",
-    intent: run.intent,
-    metadata: run.metadata,
-  });
-  ctx.ui.notify(`${definition.label} setup started.`, "info");
-  await runRunnerController(pi, definition, ctx);
+function defaultCommandActions(): RunnerCommandAction[] {
+  return [
+    {
+      name: "start",
+      usage: "start <intent>",
+      description: "Start a new approved-plan run.",
+      handler: startCommand,
+    },
+    {
+      name: "status",
+      description: "Show current run status.",
+      handler: (_input, api) => notifyStatus(api.ctx, api.definition, api.readRun()),
+    },
+    {
+      name: "help",
+      description: "Show available commands.",
+      handler: (_input, api) => api.ctx.ui.notify(helpText(api.definition), "info"),
+    },
+    {
+      name: "pause",
+      description: "Pause the active run.",
+      handler: pauseCommand,
+    },
+    {
+      name: "resume",
+      description: "Resume a paused run or continue the active run.",
+      handler: resumeCommand,
+    },
+    {
+      name: "clear",
+      aliases: ["cancel"],
+      description: "Clear the current run.",
+      handler: clearCommand,
+    },
+  ];
 }
 
-function pauseCommand(
-  pi: ExtensionAPI,
-  definition: RunnerDefinition,
-  ctx: ExtensionCommandContext,
-  run: ReturnType<typeof readRun>,
-): void {
+// Starting a run only creates setup state and sends the setup packet. No work is
+// allowed until the model submits an approved plan through the tool.
+async function startCommand(input: RunnerCommandInput, api: RunnerCommandApi): Promise<void> {
+  const intent = input.args.trim();
+  if (!intent)
+    return void api.ctx.ui.notify(
+      `Usage: /${api.definition.command.name} start <intent>`,
+      "warning",
+    );
+
+  const existing = api.readRun();
+  if (existing && existing.status !== "complete") {
+    const ok =
+      !api.ctx.hasUI ||
+      (await api.ctx.ui.confirm(`Replace current ${api.definition.label}?`, existing.intent));
+    if (!ok) return;
+    api.appendEntry({ runId: existing.id, kind: "cleared" });
+  }
+
+  const run = createRun(api.definition, intent);
+  api.appendEntry({ runId: run.id, kind: "created", intent: run.intent, metadata: run.metadata });
+  await api.definition.hooks?.onRunCreated?.(hookInput(api.pi, api.ctx, api.definition, run));
+  api.ctx.ui.notify(`${api.definition.label} setup started.`, "info");
+  await api.runController();
+}
+
+async function pauseCommand(_input: RunnerCommandInput, api: RunnerCommandApi): Promise<void> {
+  const run = api.readRun();
   if (!run || run.status !== "active") {
-    ctx.ui.notify(`No active ${definition.label} run to pause.`, "warning");
+    api.ctx.ui.notify(`No active ${api.definition.label} run to pause.`, "warning");
     return;
   }
   const paused = pauseRun(run, "user", "Paused by user command.");
-  appendRunEntry(pi, ctx, {
-    runnerId: definition.id,
+  api.appendEntry({
     runId: paused.id,
     kind: "paused",
     reason: paused.blockedReason,
     detail: paused.blockedDetail,
   });
+  await api.definition.hooks?.onPaused?.(hookInput(api.pi, api.ctx, api.definition, paused));
 }
 
-function clearCommand(
-  pi: ExtensionAPI,
-  definition: RunnerDefinition,
-  ctx: ExtensionCommandContext,
-  run: ReturnType<typeof readRun>,
-): void {
-  if (!run) return void ctx.ui.notify(`No ${definition.label} run to clear.`, "warning");
-  appendRunEntry(pi, ctx, { runnerId: definition.id, runId: run.id, kind: "cleared" });
-  ctx.ui.notify(`${definition.label} cleared.`, "info");
+function clearCommand(_input: RunnerCommandInput, api: RunnerCommandApi): void {
+  const run = api.readRun();
+  if (!run) return void api.ctx.ui.notify(`No ${api.definition.label} run to clear.`, "warning");
+  api.appendEntry({ runId: run.id, kind: "cleared" });
+  api.ctx.ui.notify(`${api.definition.label} cleared.`, "info");
 }
 
 // /<runner> resume is user-facing recovery: reactivate paused state if needed,
 // then hand control to the same controller path used by automatic continuation.
-async function resumeCommand(
-  pi: ExtensionAPI,
-  definition: RunnerDefinition,
-  ctx: ExtensionCommandContext,
-  run: ReturnType<typeof readRun>,
-): Promise<void> {
-  if (!run) return void ctx.ui.notify(`No ${definition.label} run to resume.`, "warning");
-  const inProgress = turnInProgressReason(ctx);
+async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi): Promise<void> {
+  const run = api.readRun();
+  if (!run) return void api.ctx.ui.notify(`No ${api.definition.label} run to resume.`, "warning");
+  const inProgress = turnInProgressReason(api.ctx);
   if (inProgress)
-    return void ctx.ui.notify(`${definition.label} resume skipped: ${inProgress}.`, "warning");
+    return void api.ctx.ui.notify(
+      `${api.definition.label} resume skipped: ${inProgress}.`,
+      "warning",
+    );
   if (run.status === "paused") {
     const resumed = resumeRun(run);
-    if (!resumed.ok) return void ctx.ui.notify(resumed.message, "warning");
-    appendRunEntry(pi, ctx, { runnerId: definition.id, runId: resumed.value.id, kind: "resumed" });
+    if (!resumed.ok) return void api.ctx.ui.notify(resumed.message, "warning");
+    api.appendEntry({ runId: resumed.value.id, kind: "resumed" });
+    await api.definition.hooks?.onResumed?.(
+      hookInput(api.pi, api.ctx, api.definition, resumed.value),
+    );
   }
-  await runRunnerController(pi, definition, ctx);
+  await api.runController();
 }
 
 function notifyStatus(
   ctx: ExtensionContext,
   definition: RunnerDefinition,
-  run: ReturnType<typeof readRun>,
+  run: RunState | null,
 ): void {
   ctx.ui.notify(runStatusText(run, definition.label), run ? "info" : "warning");
 }
 
-function completeArgs(prefix: string, definition: RunnerDefinition): AutocompleteItem[] | null {
-  const actions = definition.command.subcommands ?? DEFAULT_SUBCOMMANDS;
+function completeArgs(definition: RunnerDefinition, prefix: string): AutocompleteItem[] | null {
+  const actions = commandActions(definition);
+  const firstSpace = prefix.indexOf(" ");
+  if (firstSpace >= 0) {
+    const parsed = parseCommandText(prefix);
+    return findAction(actions, parsed.action)?.complete?.(parsed) ?? null;
+  }
+
   const needle = prefix.trim().toLowerCase();
   const items = actions
-    .filter((action) => action.startsWith(needle))
-    .map((action) => ({ value: action, label: action }));
+    .filter((action) => action.name.startsWith(needle))
+    .map((action) => ({ value: action.name, label: action.usage ?? action.name }));
   return items.length ? items : null;
+}
+
+function commandActions(definition: RunnerDefinition): RunnerCommandAction[] {
+  const defaults =
+    definition.command.includeDefaultActions === false ? [] : defaultCommandActions();
+  const actions = [...defaults, ...(definition.command.actions ?? [])];
+  const byName = new Map<string, RunnerCommandAction>();
+  for (const action of actions) byName.set(action.name, action);
+  return [...byName.values()];
+}
+
+function findAction(actions: RunnerCommandAction[], name: string): RunnerCommandAction | undefined {
+  return actions.find((action) => action.name === name || action.aliases?.includes(name));
+}
+
+function commandApi(
+  pi: ExtensionAPI,
+  definition: RunnerDefinition,
+  ctx: ExtensionCommandContext,
+): RunnerCommandApi {
+  return {
+    pi,
+    ctx,
+    definition,
+    readRun: () => readRun(ctx, definition.id),
+    appendEntry: (entry) => appendRunEntry(pi, ctx, { ...entry, runnerId: definition.id }),
+    runController: () => runRunnerController(pi, definition, ctx),
+  };
+}
+
+function parseCommandText(text: string): RunnerCommandInput {
+  const trimmed = text.trim();
+  const [action = "", ...rest] = trimmed.split(/\s+/);
+  return { raw: trimmed, action: action.toLowerCase(), args: rest.join(" ").trim() };
 }
 
 function helpText(definition: RunnerDefinition): string {
   const command = definition.command.name;
-  return [
-    `/${command} start <intent>`,
-    `/${command} status`,
-    `/${command} pause`,
-    `/${command} resume`,
-    `/${command} clear`,
-  ].join("\n");
+  return commandActions(definition)
+    .map((action) => `/${command} ${action.usage ?? action.name}`)
+    .join("\n");
 }
 
 async function withErrors(

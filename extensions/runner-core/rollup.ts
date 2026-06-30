@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
+import { hookInput } from "./hooks.ts";
 import { isCurrent, type RunnerToken } from "./runtime.ts";
 import { appendRunEntry, readRun } from "./store.ts";
 import { finishIfComplete, pauseRun, rollUpUnit } from "./transitions.ts";
@@ -16,7 +17,7 @@ export async function rollUpReadyUnit(
   unit: WorkUnit,
   token: RunnerToken,
 ): Promise<void> {
-  if (definition.rollup?.enabled === false) return appendRolledUp(pi, ctx, run, unit.id);
+  if (definition.rollup === false) return appendRolledUp(pi, ctx, definition, run, unit.id);
   if (!unit.startEntryId)
     return pauseAndAppend(
       pi,
@@ -24,11 +25,12 @@ export async function rollUpReadyUnit(
       run,
       "missing_rollup_anchor",
       `No branch anchor for unit ${unit.id}.`,
+      definition,
     );
 
   const result = await ctx.navigateTree(unit.startEntryId, {
     summarize: true,
-    customInstructions: definition.rollup?.prompt({ run, unit }) ?? defaultRollupPrompt(unit),
+    customInstructions: definition.rollupPrompt?.({ run, unit }) ?? defaultRollupPrompt(unit),
     label: `✓ ${unit.id} ${unit.name}`,
   });
   if (!isCurrent(token) || readRun(ctx, definition.id)?.id !== token.runId) return;
@@ -39,10 +41,11 @@ export async function rollUpReadyUnit(
       run,
       "rollup_cancelled",
       `Rollup cancelled for unit ${unit.id}.`,
+      definition,
     );
   if (alreadyRolledUp(readRun(ctx, definition.id), unit.id)) return;
 
-  appendRolledUp(pi, ctx, run, unit.id, extractSummary(result));
+  await appendRolledUp(pi, ctx, definition, run, unit.id, extractSummary(result));
 }
 
 export async function completeIfReady(
@@ -58,16 +61,18 @@ export async function completeIfReady(
     runId: completed.value.id,
     kind: "completed",
   });
+  await definition.hooks?.onCompleted?.(hookInput(pi, ctx, definition, completed.value));
   ctx.ui.notify(`${definition.label} complete.`, "info");
 }
 
-export function pauseAndAppend(
+export async function pauseAndAppend(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   run: RunState,
   reason: string,
   detail: string,
-): void {
+  definition?: RunnerDefinition,
+): Promise<void> {
   const paused = pauseRun(run, reason, detail);
   appendRunEntry(pi, ctx, {
     runnerId: paused.runnerId,
@@ -76,24 +81,30 @@ export function pauseAndAppend(
     reason: paused.blockedReason,
     detail: paused.blockedDetail,
   });
+  if (definition) await definition.hooks?.onPaused?.(hookInput(pi, ctx, definition, paused));
   ctx.ui.notify(`${reason}: ${detail}`, "warning");
 }
 
-function appendRolledUp(
+async function appendRolledUp(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
+  definition: RunnerDefinition,
   run: RunState,
   unitId: string,
   summary?: { summaryEntryId?: string; summary?: string },
-): void {
+): Promise<void> {
   const rolled = rollUpUnit(run, unitId, summary);
-  if (!rolled.ok) return pauseAndAppend(pi, ctx, run, "rollup_failed", rolled.message);
+  if (!rolled.ok) return pauseAndAppend(pi, ctx, run, "rollup_failed", rolled.message, definition);
   appendRunEntry(pi, ctx, {
     runnerId: rolled.value.runnerId,
     runId: rolled.value.id,
     kind: "unit-rolled-up",
     unitId,
     ...summary,
+  });
+  await definition.hooks?.onUnitRolledUp?.({
+    ...hookInput(pi, ctx, definition, rolled.value),
+    unitId,
   });
 }
 
@@ -113,9 +124,7 @@ function extractSummary(result: { summaryEntry?: unknown; cancelled?: boolean })
 }
 
 function defaultRollupPrompt(unit: WorkUnit): string {
-  return [
-    `Summarize completed work for ${unit.name}.`,
-    "Keep durable facts: changes, evidence, validation, decisions, blockers, and next context.",
-    "Do not continue the work.",
-  ].join("\n");
+  return `Summarize completed work for ${unit.name}.
+Keep durable facts: changes, evidence, validation, decisions, blockers, and next context.
+Do not continue the work.`;
 }

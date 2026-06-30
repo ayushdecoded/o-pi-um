@@ -14,8 +14,8 @@ export const goalRunner: RunnerDefinition = {
     name: "goal",
     description: "Approve Goal plans and record task evidence.",
   },
-  setup: { prompt: goalSetupPrompt },
-  work: { prompt: goalWorkPrompt },
-  rollup: { enabled: true, prompt: goalRollupPrompt },
+  setupPrompt: goalSetupPrompt,
+  workPrompt: goalWorkPrompt,
+  rollupPrompt: goalRollupPrompt,
   policy: { maxTasksPerUnit: 10 },
 };
