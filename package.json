@@ -7,8 +7,9 @@
     "pi-package"
   ],
   "scripts": {
-    "check": "npm run typecheck && npm run format:check",
+    "check": "npm run typecheck && npm run test && npm run format:check",
     "typecheck": "tsc --noEmit",
+    "test": "node extensions/runner-core/test.cjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -22,6 +23,7 @@
   "pi": {
     "extensions": [
       "./extensions/goal/index.ts",
+      "./extensions/robopi/index.ts",
       "./extensions/subagent/index.ts",
       "./extensions/compaction/index.ts",
       "./extensions/footer/index.ts",
@@ -29,7 +31,8 @@
       "./extensions/web-search/index.ts"
     ],
     "skills": [
-      "./skills"
+      "./skills",
+      "./extensions/robopi/skills"
     ]
   },
   "devDependencies": {
