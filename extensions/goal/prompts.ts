@@ -32,7 +32,7 @@ ${task.verification}${formatSummaries(summaries)}`;
 export function goalRollupPrompt({ unit }: RollupPromptInput): string {
   return `Summarize completed work for ${unit.name}.
 Keep only durable facts: changed/read files, completed work, evidence, validation, decisions, blockers, and context needed for later tasks.
-Do not continue the work. Keep the summary focused on durable work context.`;
+Summarize only. Do not perform additional work.`;
 }
 
 function formatSummaries(summaries: UnitSummary[] | undefined): string {

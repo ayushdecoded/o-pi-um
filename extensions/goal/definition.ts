@@ -12,7 +12,7 @@ export const goalRunner: RunnerDefinition = {
   },
   tool: {
     name: "goal",
-    description: "Approve Goal plans and record task evidence.",
+    description: "Approve Goal plans and report task results.",
   },
   setupPrompt: goalSetupPrompt,
   workPrompt: goalWorkPrompt,

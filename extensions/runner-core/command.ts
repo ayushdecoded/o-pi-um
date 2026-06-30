@@ -73,7 +73,7 @@ function defaultCommandActions(): RunnerCommandAction[] {
     },
     {
       name: "resume",
-      description: "Resume a paused run or continue the active run.",
+      description: "Resume a paused run or wake the current run.",
       handler: resumeCommand,
     },
     {

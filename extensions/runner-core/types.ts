@@ -103,11 +103,9 @@ export type RunnerToolResult = {
 };
 
 export type RunnerWorkflow = {
-  hasAssignedIncompleteTask?: (run: RunState) => boolean;
   unitReadyToRollUp?: (run: RunState) => WorkUnit | null;
   isPlanComplete?: (run: RunState) => boolean;
   startNextWork?: (run: RunState) => CoreResult<{ run: RunState; work: ReadyWork }>;
-  onNoProgress?: (input: RunnerHookInput) => "pause" | "ignore" | Promise<"pause" | "ignore">;
 };
 
 export type RunnerHooks = {

@@ -42,11 +42,11 @@ Tool definitions teach the protocol:
 
 ```ts
 goal({ action: "approve", contract, plan });
-goal({ action: "evidence", id, evidence });
-goal({ action: "pause", reason });
+goal({ action: "evidence", id, result: "complete", evidence });
+goal({ action: "evidence", id, result: "failed", evidence });
 ```
 
-If progress is invalid, core rejects with a specific message such as `Completed task t3 needs evidence.` Evidence implies task completion.
+If progress is invalid, core rejects with a specific message such as `Completed task t3 needs evidence.` Complete evidence marks the task done; failed evidence pauses the run with the model-provided reason.
 
 ## Feature shape
 

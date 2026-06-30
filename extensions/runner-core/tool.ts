@@ -12,16 +12,15 @@ import {
 } from "./plan.ts";
 import { appendRunEntry, readRun } from "./store.ts";
 import { approvePlan, pauseRun, updateTask } from "./transitions.ts";
-import type { RunnerDefinition, RunnerToolAction, RunnerToolResult, RunState } from "./types.ts";
+import type { RunnerDefinition, RunnerToolAction, RunnerToolResult } from "./types.ts";
 
 export type RunnerToolParams =
   | { action: "approve"; contract: string; plan: PlanInput }
-  | ({ action: "evidence" } & TaskUpdateInput)
-  | { action: "pause"; reason?: string };
+  | ({ action: "evidence"; result: "complete" | "failed" } & TaskUpdateInput);
 
-// Registers the model-facing state tool for a runner. Core supplies approve,
-// evidence, and pause; feature definitions can add/override actions without
-// forking the base tool protocol.
+// Registers the model-facing state tool for a runner. Core supplies approve and
+// evidence. Evidence is explicit: the assigned task either completed or failed.
+// Feature definitions can add/override actions without forking the base tool protocol.
 export function registerRunnerTool(pi: ExtensionAPI, definition: RunnerDefinition): void {
   const toolName = definition.tool.name;
   const actions = toolActions(definition);
@@ -29,7 +28,7 @@ export function registerRunnerTool(pi: ExtensionAPI, definition: RunnerDefinitio
     name: toolName,
     label: definition.label,
     description: definition.tool.description ?? `${definition.label} work state`,
-    promptSnippet: `${definition.label}: approve the plan; during work, submit evidence for the assigned task.`,
+    promptSnippet: `${definition.label}: approve the plan; during work, report whether the assigned task completed or failed.`,
     promptGuidelines: promptGuidelines(toolName, actions),
     parameters: parametersFor(actions),
     executionMode: "sequential",
@@ -63,14 +62,9 @@ function defaultToolActions(): RunnerToolAction[] {
     {
       action: "evidence",
       parameters: EvidenceParamsSchema,
-      guideline: 'Work: call { action:"evidence", id, evidence } for the assigned task.',
+      guideline:
+        'Work: call { action:"evidence", id, result:"complete", evidence } when done, or { action:"evidence", id, result:"failed", evidence } when blocked/failed.',
       execute: updateTaskFromTool,
-    },
-    {
-      action: "pause",
-      parameters: PauseParamsSchema,
-      guideline: 'Use { action:"pause", reason } if blocked.',
-      execute: pauseFromTool,
     },
   ];
 }
@@ -106,14 +100,32 @@ async function updateTaskFromTool({
   if (!run || run.status !== "active") fail(`No active ${definition.label} run.`);
   const update = normalizeTaskUpdate(params as TaskUpdateInput);
   if (!update?.evidence) fail("Provide task evidence for the assigned task.");
+  if (params.result === "failed") {
+    if (!run.currentTaskId) fail("No task is currently assigned.");
+    if (update.id !== run.currentTaskId)
+      fail(`Task ${update.id} is not the current assigned task.`);
+    const paused = pauseRun(run, "task_failed", update.evidence);
+    appendRunEntry(pi, ctx, {
+      runnerId: definition.id,
+      runId: paused.id,
+      kind: "paused",
+      reason: paused.blockedReason,
+      detail: paused.blockedDetail,
+      taskId: update.id,
+      evidence: update.evidence,
+    });
+    await definition.hooks?.onPaused?.(hookInput(pi, ctx, definition, paused));
+    return response(`${definition.label} paused: task ${update.id} failed. ${update.evidence}`);
+  }
+
   const updated = updateTask(run, update);
   if (!updated.ok) fail(formatIssues(updated.message, updated.issues));
   appendRunEntry(pi, ctx, {
     runnerId: definition.id,
     runId: updated.value.id,
     kind: "task-evidence",
-    taskId: update?.id,
-    evidence: update?.evidence,
+    taskId: update.id,
+    evidence: update.evidence,
   });
   await definition.hooks?.onTaskEvidence?.({
     ...hookInput(pi, ctx, definition, updated.value),
@@ -121,27 +133,6 @@ async function updateTaskFromTool({
     evidence: update.evidence,
   });
   return response(taskUpdateText(updated.value));
-}
-
-async function pauseFromTool({
-  pi,
-  definition,
-  params,
-  ctx,
-  run,
-}: Parameters<RunnerToolAction["execute"]>[0]): Promise<RunnerToolResult> {
-  if (!run || run.status !== "active") fail(`No active ${definition.label} run to pause.`);
-  const reason = typeof params.reason === "string" ? params.reason : undefined;
-  const paused = pauseRun(run, "blocked", reason?.trim() || "Blocked by the current work.");
-  appendRunEntry(pi, ctx, {
-    runnerId: definition.id,
-    runId: paused.id,
-    kind: "paused",
-    reason: paused.blockedReason,
-    detail: paused.blockedDetail,
-  });
-  await definition.hooks?.onPaused?.(hookInput(pi, ctx, definition, paused));
-  return response(`${definition.label} paused: ${paused.blockedDetail}`);
 }
 
 function toolActions(definition: RunnerDefinition): RunnerToolAction[] {
@@ -224,15 +215,8 @@ const EvidenceParamsSchema = Type.Object(
   {
     action: StringEnum(["evidence"] as const),
     id: Type.String({ description: "Assigned task id." }),
-    evidence: Type.String({ description: "Completion evidence." }),
-  },
-  strict,
-);
-
-const PauseParamsSchema = Type.Object(
-  {
-    action: StringEnum(["pause"] as const),
-    reason: Type.Optional(Type.String({ description: "Pause/blocker reason." })),
+    result: StringEnum(["complete", "failed"] as const),
+    evidence: Type.String({ description: "What was completed, or why the task failed/blocked." }),
   },
   strict,
 );

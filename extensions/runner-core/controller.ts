@@ -80,8 +80,8 @@ export async function runRunnerController(
 }
 
 // One event wake -> one concrete action: setup packet, task packet, rollup,
-// completion, or pause. Workflow hooks can swap policy decisions while the core
-// still owns durable state, turn gating, and branch navigation.
+// or completion. If a task is already assigned, core waits for the model to
+// report complete/failed via the tool instead of injecting another work packet.
 async function controllerStep(
   pi: ExtensionAPI,
   definition: RunnerDefinition,
@@ -94,21 +94,7 @@ async function controllerStep(
   if (run.status === "setup") return sendSetupTurn(pi, definition, run);
 
   const workflow = definition.workflow ?? {};
-  if ((workflow.hasAssignedIncompleteTask ?? hasAssignedIncompleteTask)(run)) {
-    const decision =
-      (await workflow.onNoProgress?.(hookInput(pi, ctx, definition, run))) ?? "pause";
-    if (decision === "pause") {
-      await pauseAndAppend(
-        pi,
-        ctx,
-        run,
-        "no_progress",
-        "The last work turn made no durable task progress.",
-        definition,
-      );
-    }
-    return;
-  }
+  if (hasAssignedIncompleteTask(run)) return;
 
   const unit = (workflow.unitReadyToRollUp ?? unitReadyToRollUp)(run);
   if (unit) {

@@ -12,7 +12,7 @@ export const robopiRunner: RunnerDefinition = {
   },
   tool: {
     name: "robopi",
-    description: "Approve RoboPi plans and record task evidence.",
+    description: "Approve RoboPi plans and report task results.",
   },
   setupPrompt: robopiSetupPrompt,
   workPrompt: robopiWorkPrompt,

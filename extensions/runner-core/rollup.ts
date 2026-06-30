@@ -126,5 +126,5 @@ function extractSummary(result: { summaryEntry?: unknown; cancelled?: boolean })
 function defaultRollupPrompt(unit: WorkUnit): string {
   return `Summarize completed work for ${unit.name}.
 Keep durable facts: changes, evidence, validation, decisions, blockers, and next context.
-Do not continue the work.`;
+Summarize only. Do not perform additional work.`;
 }

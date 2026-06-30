@@ -183,12 +183,67 @@ function entry(id, kind, runId, data = {}) {
     });
     await tool.execute(
       "call",
-      { action: "evidence", id: "t1", evidence: "proof" },
+      { action: "evidence", id: "t1", result: "complete", evidence: "proof" },
       undefined,
       undefined,
       ctx,
     );
     assert.equal(readRun(ctx, "goal")?.plan.units[0].tasks[0].evidence, "proof");
+  }
+
+  {
+    const entries = [];
+    let tool;
+    const pi = {
+      registerTool(config) {
+        tool = config;
+      },
+      appendEntry(customType, data) {
+        entries.push({ id: `e${entries.length}`, type: "custom", customType, data });
+        return entries.at(-1).id;
+      },
+    };
+    const ctx = {
+      sessionManager: { getBranch: () => entries, getLeafId: () => entries.at(-1)?.id },
+    };
+    const run = approvePlan(createRun(definition, "intent"), definition, plan()).value;
+    const assigned = startNextWork(run).value.run;
+    pi.appendEntry(RUNNER_ENTRY_TYPE, {
+      version: 1,
+      runnerId: "goal",
+      runId: assigned.id,
+      kind: "created",
+      timestamp: 1,
+      intent: assigned.intent,
+    });
+    pi.appendEntry(RUNNER_ENTRY_TYPE, {
+      version: 1,
+      runnerId: "goal",
+      runId: assigned.id,
+      kind: "plan-approved",
+      timestamp: 2,
+      plan: assigned.plan,
+    });
+    pi.appendEntry(RUNNER_ENTRY_TYPE, {
+      version: 1,
+      runnerId: "goal",
+      runId: assigned.id,
+      kind: "task-assigned",
+      timestamp: 3,
+      unitId: "s1",
+      taskId: "t1",
+    });
+
+    registerRunnerTool(pi, definition);
+    await tool.execute(
+      "call",
+      { action: "evidence", id: "t1", result: "failed", evidence: "blocked by missing API" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.equal(readRun(ctx, "goal")?.status, "paused");
+    assert.equal(readRun(ctx, "goal")?.blockedReason, "task_failed");
   }
 
   {
@@ -300,8 +355,11 @@ function entry(id, kind, runId, data = {}) {
     assert.equal(sent.at(-1).customType, "runner-core-work");
     assert.equal(readRun(ctx, "goal")?.currentTaskId, "t1");
 
+    const sentBeforeWaiting = sent.length;
     await runRunnerController(pi, definition, ctx);
-    assert.equal(readRun(ctx, "goal")?.status, "paused");
+    assert.equal(readRun(ctx, "goal")?.status, "active");
+    assert.equal(readRun(ctx, "goal")?.currentTaskId, "t1");
+    assert.equal(sent.length, sentBeforeWaiting);
 
     const queuedCtx = {
       sessionManager: {
