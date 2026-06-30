@@ -5,8 +5,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { RUNNER_SETUP_MESSAGE_TYPE, RUNNER_WORK_MESSAGE_TYPE } from "./constants.ts";
+import { emitRunnerEvent } from "./effects.ts";
 import { isPlanComplete } from "./graph.ts";
-import { hookInput } from "./hooks.ts";
 import { sendTurn } from "./messages.ts";
 import { completeIfReady, pauseAndAppend, rollUpReadyUnit } from "./rollup.ts";
 import {
@@ -17,7 +17,7 @@ import {
   turnInProgressReason,
   type RunnerToken,
 } from "./runtime.ts";
-import { appendRunEntry, readRun } from "./store.ts";
+import { appendCoreEvent, readRun } from "./store.ts";
 import { hasAssignedIncompleteTask, startNextWork, unitReadyToRollUp } from "./transitions.ts";
 import type { ReadyWork, RunnerDefinition, RunState } from "./types.ts";
 
@@ -128,21 +128,18 @@ async function sendWorkTurn(
   run: RunState,
   work: ReadyWork,
 ): Promise<void> {
-  appendRunEntry(pi, ctx, {
+  const event = { type: "task.assigned", unitId: work.unit.id, taskId: work.task.id } as const;
+  const entryId = appendCoreEvent(pi, ctx, {
     runnerId: definition.id,
     runId: run.id,
-    kind: "task-assigned",
-    unitId: work.unit.id,
-    taskId: work.task.id,
+    event,
   });
-  await definition.hooks?.onTaskAssigned?.({
-    ...hookInput(pi, ctx, definition, run),
-    work,
-  });
+  const afterAppend = readRun(ctx, definition.id) ?? run;
+  await emitRunnerEvent(pi, ctx, definition, event, afterAppend, entryId);
   sendTurn(
     pi,
     RUNNER_WORK_MESSAGE_TYPE,
-    definition.workPrompt({ run, ...work, summaries: run.summaries }),
+    definition.workPrompt({ run: afterAppend, ...work, summaries: afterAppend.summaries }),
     {
       runnerId: definition.id,
       runId: run.id,

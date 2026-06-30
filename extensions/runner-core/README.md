@@ -65,7 +65,7 @@ const goalRunner = {
 };
 ```
 
-Run entries are compact facts, not full snapshots: created, plan-approved, task-assigned, task-evidence, unit-rolled-up, paused, resumed, completed, cleared.
+Run entries are compact facts, not full snapshots. Core events are discriminated payloads: `run.created`, `plan.approved`, `task.assigned`, `task.reported`, `unit.rolled_up`, `run.paused`, `run.resumed`, `run.completed`, `run.cleared`. Feature events are namespaced separately and never affect core replay.
 
 Customization stays narrow and composable:
 
@@ -73,6 +73,6 @@ Customization stays narrow and composable:
 - `command.actions` adds or overrides slash-command actions.
 - `tool.actions` adds model-facing actions.
 - `workflow` swaps scheduler policy decisions.
-- `hooks` attach feature side effects to durable transitions.
+- `effects` react to durable core events and can persist namespaced feature events.
 
 RoboPi can remain a thin definition until it has real external behavior. Worktree/GitHub behavior should stay outside core.

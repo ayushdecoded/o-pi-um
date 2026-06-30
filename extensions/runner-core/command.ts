@@ -6,9 +6,9 @@ import type {
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
 import { rememberRunnerContext, runRunnerController, turnInProgressReason } from "./controller.ts";
+import { emitRunnerEvent } from "./effects.ts";
 import { runStatusText } from "./format.ts";
-import { hookInput } from "./hooks.ts";
-import { appendRunEntry, readRun } from "./store.ts";
+import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
 import { createRun, pauseRun, resumeRun } from "./transitions.ts";
 import type {
   RunnerCommandAction,
@@ -101,12 +101,23 @@ async function startCommand(input: RunnerCommandInput, api: RunnerCommandApi): P
       !api.ctx.hasUI ||
       (await api.ctx.ui.confirm(`Replace current ${api.definition.label}?`, existing.intent));
     if (!ok) return;
-    api.appendEntry({ runId: existing.id, kind: "cleared" });
+    const event = { type: "run.cleared" } as const;
+    const entryId = appendCoreEvent(api.pi, api.ctx, {
+      runnerId: api.definition.id,
+      runId: existing.id,
+      event,
+    });
+    await emitRunnerEvent(api.pi, api.ctx, api.definition, event, existing, entryId);
   }
 
   const run = createRun(api.definition, intent);
-  api.appendEntry({ runId: run.id, kind: "created", intent: run.intent, metadata: run.metadata });
-  await api.definition.hooks?.onRunCreated?.(hookInput(api.pi, api.ctx, api.definition, run));
+  const event = { type: "run.created", intent: run.intent, metadata: run.metadata } as const;
+  const entryId = appendCoreEvent(api.pi, api.ctx, {
+    runnerId: api.definition.id,
+    runId: run.id,
+    event,
+  });
+  await emitRunnerEvent(api.pi, api.ctx, api.definition, event, run, entryId);
   api.ctx.ui.notify(`${api.definition.label} setup started.`, "info");
   await api.runController();
 }
@@ -118,19 +129,29 @@ async function pauseCommand(_input: RunnerCommandInput, api: RunnerCommandApi): 
     return;
   }
   const paused = pauseRun(run, "user", "Paused by user command.");
-  api.appendEntry({
-    runId: paused.id,
-    kind: "paused",
-    reason: paused.blockedReason,
+  const event = {
+    type: "run.paused",
+    reason: paused.blockedReason ?? "user",
     detail: paused.blockedDetail,
+  } as const;
+  const entryId = appendCoreEvent(api.pi, api.ctx, {
+    runnerId: api.definition.id,
+    runId: paused.id,
+    event,
   });
-  await api.definition.hooks?.onPaused?.(hookInput(api.pi, api.ctx, api.definition, paused));
+  await emitRunnerEvent(api.pi, api.ctx, api.definition, event, paused, entryId);
 }
 
-function clearCommand(_input: RunnerCommandInput, api: RunnerCommandApi): void {
+async function clearCommand(_input: RunnerCommandInput, api: RunnerCommandApi): Promise<void> {
   const run = api.readRun();
   if (!run) return void api.ctx.ui.notify(`No ${api.definition.label} run to clear.`, "warning");
-  api.appendEntry({ runId: run.id, kind: "cleared" });
+  const event = { type: "run.cleared" } as const;
+  const entryId = appendCoreEvent(api.pi, api.ctx, {
+    runnerId: api.definition.id,
+    runId: run.id,
+    event,
+  });
+  await emitRunnerEvent(api.pi, api.ctx, api.definition, event, run, entryId);
   api.ctx.ui.notify(`${api.definition.label} cleared.`, "info");
 }
 
@@ -148,10 +169,13 @@ async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi):
   if (run.status === "paused") {
     const resumed = resumeRun(run);
     if (!resumed.ok) return void api.ctx.ui.notify(resumed.message, "warning");
-    api.appendEntry({ runId: resumed.value.id, kind: "resumed" });
-    await api.definition.hooks?.onResumed?.(
-      hookInput(api.pi, api.ctx, api.definition, resumed.value),
-    );
+    const event = { type: "run.resumed" } as const;
+    const entryId = appendCoreEvent(api.pi, api.ctx, {
+      runnerId: api.definition.id,
+      runId: resumed.value.id,
+      event,
+    });
+    await emitRunnerEvent(api.pi, api.ctx, api.definition, event, resumed.value, entryId);
   }
   await api.runController();
 }
@@ -202,7 +226,18 @@ function commandApi(
     ctx,
     definition,
     readRun: () => readRun(ctx, definition.id),
-    appendEntry: (entry) => appendRunEntry(pi, ctx, { ...entry, runnerId: definition.id }),
+    appendFeatureEvent: (type, payload, namespace = definition.id) => {
+      const run = readRun(ctx, definition.id);
+      if (!run) throw new Error(`No ${definition.label} run is active.`);
+      return appendFeatureEvent(pi, ctx, {
+        runnerId: definition.id,
+        runId: run.id,
+        namespace,
+        event: type,
+        payload,
+      });
+    },
+    readFeatureEvents: (options = {}) => readFeatureEvents(ctx, definition.id, options),
     runController: () => runRunnerController(pi, definition, ctx),
   };
 }

@@ -37,7 +37,8 @@ export type RunnerDefinition = {
   rollup?: false;
   policy?: RunnerPolicy;
   workflow?: RunnerWorkflow;
-  hooks?: RunnerHooks;
+  /** React to durable core events. Effects are for side effects/facts, not scheduling policy. */
+  effects?: RunnerEffect | RunnerEffect[];
 };
 
 export type RunnerCommandConfig = {
@@ -69,7 +70,8 @@ export type RunnerCommandApi = {
   ctx: ExtensionCommandContext;
   definition: RunnerDefinition;
   readRun: () => RunState | null;
-  appendEntry: (entry: RunnerEntryDraft) => string;
+  appendFeatureEvent: (type: string, payload?: unknown, namespace?: string) => string;
+  readFeatureEvents: (options?: ReadFeatureEventsOptions) => RunnerFeatureEventRecord[];
   runController: () => Promise<void>;
 };
 
@@ -95,6 +97,8 @@ export type RunnerToolActionInput = {
   definition: RunnerDefinition;
   params: Record<string, unknown>;
   run: RunState | null;
+  appendFeatureEvent: (type: string, payload?: unknown, namespace?: string) => string;
+  readFeatureEvents: (options?: ReadFeatureEventsOptions) => RunnerFeatureEventRecord[];
 };
 
 export type RunnerToolResult = {
@@ -108,29 +112,69 @@ export type RunnerWorkflow = {
   startNextWork?: (run: RunState) => CoreResult<{ run: RunState; work: ReadyWork }>;
 };
 
-export type RunnerHooks = {
-  onRunCreated?: (input: RunnerHookInput) => void | Promise<void>;
-  onPlanApproved?: (input: RunnerHookInput) => void | Promise<void>;
-  onTaskAssigned?: (input: RunnerHookInput & { work: ReadyWork }) => void | Promise<void>;
-  onTaskEvidence?: (
-    input: RunnerHookInput & { taskId: string; evidence: string },
-  ) => void | Promise<void>;
-  onUnitRolledUp?: (input: RunnerHookInput & { unitId: string }) => void | Promise<void>;
-  onPaused?: (input: RunnerHookInput) => void | Promise<void>;
-  onResumed?: (input: RunnerHookInput) => void | Promise<void>;
-  onCompleted?: (input: RunnerHookInput) => void | Promise<void>;
-};
+export type RunnerEffect = (event: RunnerEffectEvent, api: RunnerEffectApi) => void | Promise<void>;
 
-export type RunnerHookInput = {
-  pi: ExtensionAPI;
-  ctx: ExtensionContext;
-  definition: RunnerDefinition;
-  run: RunState;
+export type RunnerEffectApi = {
+  runnerId: string;
+  label: string;
   readRun: () => RunState | null;
+  appendFeatureEvent: (type: string, payload?: unknown, namespace?: string) => string;
+  readFeatureEvents: (options?: ReadFeatureEventsOptions) => RunnerFeatureEventRecord[];
+  notify: ExtensionContext["ui"]["notify"];
 };
 
-export type RunnerEntryDraft = Omit<RunEntry, "version" | "timestamp" | "runnerId"> & {
-  runnerId?: string;
+export type RunnerEffectEvent = RunnerCoreEvent & {
+  run: RunState;
+  entryId: string;
+};
+
+export type RunnerCoreEvent =
+  | { type: "run.created"; intent: string; metadata?: Record<string, unknown> }
+  | { type: "plan.approved"; plan: WorkPlan }
+  | { type: "task.assigned"; unitId: string; taskId: string }
+  | { type: "task.reported"; taskId: string; result: "complete" | "failed"; evidence: string }
+  | { type: "unit.rolled_up"; unitId: string; summaryEntryId?: string; summary?: string }
+  | { type: "run.paused"; reason: string; detail?: string }
+  | { type: "run.resumed" }
+  | { type: "run.completed" }
+  | { type: "run.cleared" };
+
+export type RunnerFeatureEventRecord = {
+  id: string;
+  runnerId: string;
+  runId: string;
+  namespace: string;
+  type: string;
+  payload?: unknown;
+  timestamp: number;
+};
+
+export type ReadFeatureEventsOptions = {
+  runId?: string;
+  namespace?: string;
+  type?: string;
+};
+
+export type RunnerStoredEntry = RunnerCoreEventEntry | RunnerFeatureEventEntry;
+
+export type RunnerCoreEventEntry = {
+  version: 1;
+  scope: "core";
+  runnerId: string;
+  runId: string;
+  timestamp: number;
+  event: RunnerCoreEvent;
+};
+
+export type RunnerFeatureEventEntry = {
+  version: 1;
+  scope: "feature";
+  runnerId: string;
+  runId: string;
+  timestamp: number;
+  namespace: string;
+  event: string;
+  payload?: unknown;
 };
 
 export type RunState = {
@@ -183,35 +227,6 @@ export type UnitSummary = {
   summaryEntryId?: string;
   summary?: string;
   createdAt: number;
-};
-
-export type RunEntryKind =
-  | "created"
-  | "plan-approved"
-  | "task-assigned"
-  | "task-evidence"
-  | "unit-rolled-up"
-  | "paused"
-  | "resumed"
-  | "completed"
-  | "cleared";
-
-export type RunEntry = {
-  version: 1;
-  runnerId: string;
-  runId: string;
-  kind: RunEntryKind;
-  timestamp: number;
-  intent?: string;
-  metadata?: Record<string, unknown>;
-  plan?: WorkPlan;
-  unitId?: string;
-  taskId?: string;
-  evidence?: string;
-  summaryEntryId?: string;
-  summary?: string;
-  reason?: string;
-  detail?: string;
 };
 
 export type ReadyWork = {

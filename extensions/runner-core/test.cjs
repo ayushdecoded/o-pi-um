@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const jiti = require("jiti")(process.cwd() + "/extensions/runner-core/test.cjs");
 
 const { createRun, approvePlan, startNextWork, updateTask, rollUpUnit } = jiti("./transitions.ts");
-const { readRun, RUNNER_ENTRY_TYPE } = jiti("./store.ts");
+const { readRun, readFeatureEvents, RUNNER_ENTRY_TYPE } = jiti("./store.ts");
 const { runStatusText } = jiti("./format.ts");
 const { registerRunnerTool } = jiti("./tool.ts");
 const { registerRunnerCommand } = jiti("./command.ts");
@@ -43,12 +43,53 @@ function plan() {
 }
 
 function entry(id, kind, runId, data = {}) {
+  return { id, type: "custom", customType: RUNNER_ENTRY_TYPE, data: eventData(kind, runId, data) };
+}
+
+function eventData(kind, runId, data = {}) {
   return {
-    id,
-    type: "custom",
-    customType: RUNNER_ENTRY_TYPE,
-    data: { version: 1, runnerId: "goal", runId, kind, timestamp: 1, ...data },
+    version: 1,
+    scope: "core",
+    runnerId: "goal",
+    runId,
+    timestamp: 1,
+    event: event(kind, data),
   };
+}
+
+function event(kind, data = {}) {
+  if (kind === "created")
+    return { type: "run.created", intent: data.intent ?? "intent", metadata: data.metadata };
+  if (kind === "plan-approved") return { type: "plan.approved", plan: data.plan };
+  if (kind === "task-assigned")
+    return { type: "task.assigned", unitId: data.unitId, taskId: data.taskId };
+  if (kind === "task-evidence")
+    return {
+      type: "task.reported",
+      taskId: data.taskId,
+      result: "complete",
+      evidence: data.evidence,
+    };
+  if (kind === "task-failed")
+    return {
+      type: "task.reported",
+      taskId: data.taskId,
+      result: "failed",
+      evidence: data.evidence,
+    };
+  if (kind === "unit-rolled-up")
+    return {
+      type: "unit.rolled_up",
+      unitId: data.unitId,
+      summaryEntryId: data.summaryEntryId,
+      summary: data.summary,
+    };
+  if (kind === "paused")
+    return { type: "run.paused", reason: data.reason ?? "blocked", detail: data.detail };
+  if (kind === "resumed") return { type: "run.resumed" };
+  if (kind === "completed") return { type: "run.completed" };
+  if (kind === "cleared") return { type: "run.cleared" };
+  throw new Error(`unknown event kind ${kind}`);
 }
 
 (async () => {
@@ -152,14 +193,7 @@ function entry(id, kind, runId, data = {}) {
       sessionManager: { getBranch: () => entries, getLeafId: () => entries.at(-1)?.id },
     };
     const run = createRun(definition, "intent");
-    pi.appendEntry(RUNNER_ENTRY_TYPE, {
-      version: 1,
-      runnerId: "goal",
-      runId: run.id,
-      kind: "created",
-      timestamp: 1,
-      intent: run.intent,
-    });
+    pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("created", run.id, { intent: run.intent }));
 
     registerRunnerTool(pi, definition);
     assert.ok(tool);
@@ -172,15 +206,10 @@ function entry(id, kind, runId, data = {}) {
     );
     let active = readRun(ctx, "goal");
     active = startNextWork(active).value.run;
-    pi.appendEntry(RUNNER_ENTRY_TYPE, {
-      version: 1,
-      runnerId: "goal",
-      runId: active.id,
-      kind: "task-assigned",
-      timestamp: 2,
-      unitId: "s1",
-      taskId: "t1",
-    });
+    pi.appendEntry(
+      RUNNER_ENTRY_TYPE,
+      eventData("task-assigned", active.id, { unitId: "s1", taskId: "t1" }),
+    );
     await tool.execute(
       "call",
       { action: "evidence", id: "t1", result: "complete", evidence: "proof" },
@@ -208,31 +237,18 @@ function entry(id, kind, runId, data = {}) {
     };
     const run = approvePlan(createRun(definition, "intent"), definition, plan()).value;
     const assigned = startNextWork(run).value.run;
-    pi.appendEntry(RUNNER_ENTRY_TYPE, {
-      version: 1,
-      runnerId: "goal",
-      runId: assigned.id,
-      kind: "created",
-      timestamp: 1,
-      intent: assigned.intent,
-    });
-    pi.appendEntry(RUNNER_ENTRY_TYPE, {
-      version: 1,
-      runnerId: "goal",
-      runId: assigned.id,
-      kind: "plan-approved",
-      timestamp: 2,
-      plan: assigned.plan,
-    });
-    pi.appendEntry(RUNNER_ENTRY_TYPE, {
-      version: 1,
-      runnerId: "goal",
-      runId: assigned.id,
-      kind: "task-assigned",
-      timestamp: 3,
-      unitId: "s1",
-      taskId: "t1",
-    });
+    pi.appendEntry(
+      RUNNER_ENTRY_TYPE,
+      eventData("created", assigned.id, { intent: assigned.intent }),
+    );
+    pi.appendEntry(
+      RUNNER_ENTRY_TYPE,
+      eventData("plan-approved", assigned.id, { plan: assigned.plan }),
+    );
+    pi.appendEntry(
+      RUNNER_ENTRY_TYPE,
+      eventData("task-assigned", assigned.id, { unitId: "s1", taskId: "t1" }),
+    );
 
     registerRunnerTool(pi, definition);
     await tool.execute(
@@ -275,6 +291,45 @@ function entry(id, kind, runId, data = {}) {
       sessionManager: { getSessionFile: () => "session.jsonl", getSessionId: () => "session" },
     });
     assert.deepEqual(messages, ["Goal:value"]);
+  }
+
+  {
+    let command;
+    const events = [];
+    const entries = [];
+    const pi = {
+      registerCommand(_name, config) {
+        command = config;
+      },
+      appendEntry(customType, data) {
+        entries.push({ id: `e${entries.length}`, type: "custom", customType, data });
+        return entries.at(-1).id;
+      },
+      sendMessage() {},
+    };
+    const ctx = {
+      hasUI: false,
+      ui: { notify() {} },
+      sessionManager: {
+        getBranch: () => entries,
+        getLeafId: () => entries.at(-1)?.id,
+        getSessionFile: () => "session.jsonl",
+        getSessionId: () => "session",
+        getLeafEntry: () => entries.at(-1),
+      },
+    };
+    const effectDefinition = {
+      ...definition,
+      effects(event, api) {
+        events.push(event.type);
+        if (event.type === "run.created")
+          api.appendFeatureEvent("created", { intent: event.intent });
+      },
+    };
+    registerRunnerCommand(pi, effectDefinition);
+    await command.handler("start effect intent", ctx);
+    assert.deepEqual(events, ["run.created"]);
+    assert.equal(readFeatureEvents(ctx, "goal", { type: "created" }).length, 1);
   }
 
   {
@@ -330,27 +385,13 @@ function entry(id, kind, runId, data = {}) {
       },
     };
     const run = createRun(definition, "intent");
-    pi.appendEntry(RUNNER_ENTRY_TYPE, {
-      version: 1,
-      runnerId: "goal",
-      runId: run.id,
-      kind: "created",
-      timestamp: 1,
-      intent: run.intent,
-    });
+    pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("created", run.id, { intent: run.intent }));
 
     await runRunnerController(pi, definition, ctx);
     assert.equal(sent.at(-1).customType, "runner-core-setup");
 
     const approved = approvePlan(run, definition, plan()).value;
-    pi.appendEntry(RUNNER_ENTRY_TYPE, {
-      version: 1,
-      runnerId: "goal",
-      runId: run.id,
-      kind: "plan-approved",
-      timestamp: 2,
-      plan: approved.plan,
-    });
+    pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("plan-approved", run.id, { plan: approved.plan }));
     await runRunnerController(pi, definition, ctx);
     assert.equal(sent.at(-1).customType, "runner-core-work");
     assert.equal(readRun(ctx, "goal")?.currentTaskId, "t1");

@@ -1,8 +1,8 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-import { hookInput } from "./hooks.ts";
+import { emitRunnerEvent } from "./effects.ts";
 import { isCurrent, type RunnerToken } from "./runtime.ts";
-import { appendRunEntry, readRun } from "./store.ts";
+import { appendCoreEvent, readRun } from "./store.ts";
 import { finishIfComplete, pauseRun, rollUpUnit } from "./transitions.ts";
 import type { RunnerDefinition, RunState, WorkUnit } from "./types.ts";
 
@@ -56,12 +56,13 @@ export async function completeIfReady(
 ): Promise<void> {
   const completed = finishIfComplete(run);
   if (!completed.ok) return;
-  appendRunEntry(pi, ctx, {
+  const event = { type: "run.completed" } as const;
+  const entryId = appendCoreEvent(pi, ctx, {
     runnerId: definition.id,
     runId: completed.value.id,
-    kind: "completed",
+    event,
   });
-  await definition.hooks?.onCompleted?.(hookInput(pi, ctx, definition, completed.value));
+  await emitRunnerEvent(pi, ctx, definition, event, completed.value, entryId);
   ctx.ui.notify(`${definition.label} complete.`, "info");
 }
 
@@ -74,14 +75,17 @@ export async function pauseAndAppend(
   definition?: RunnerDefinition,
 ): Promise<void> {
   const paused = pauseRun(run, reason, detail);
-  appendRunEntry(pi, ctx, {
+  const event = {
+    type: "run.paused",
+    reason: paused.blockedReason ?? reason,
+    detail: paused.blockedDetail,
+  } as const;
+  const entryId = appendCoreEvent(pi, ctx, {
     runnerId: paused.runnerId,
     runId: paused.id,
-    kind: "paused",
-    reason: paused.blockedReason,
-    detail: paused.blockedDetail,
+    event,
   });
-  if (definition) await definition.hooks?.onPaused?.(hookInput(pi, ctx, definition, paused));
+  if (definition) await emitRunnerEvent(pi, ctx, definition, event, paused, entryId);
   ctx.ui.notify(`${reason}: ${detail}`, "warning");
 }
 
@@ -95,17 +99,13 @@ async function appendRolledUp(
 ): Promise<void> {
   const rolled = rollUpUnit(run, unitId, summary);
   if (!rolled.ok) return pauseAndAppend(pi, ctx, run, "rollup_failed", rolled.message, definition);
-  appendRunEntry(pi, ctx, {
+  const event = { type: "unit.rolled_up", unitId, ...summary } as const;
+  const entryId = appendCoreEvent(pi, ctx, {
     runnerId: rolled.value.runnerId,
     runId: rolled.value.id,
-    kind: "unit-rolled-up",
-    unitId,
-    ...summary,
+    event,
   });
-  await definition.hooks?.onUnitRolledUp?.({
-    ...hookInput(pi, ctx, definition, rolled.value),
-    unitId,
-  });
+  await emitRunnerEvent(pi, ctx, definition, event, rolled.value, entryId);
 }
 
 function alreadyRolledUp(run: RunState | null, unitId: string): boolean {

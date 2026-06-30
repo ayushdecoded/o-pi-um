@@ -2,24 +2,36 @@ export { registerRunner, registerRunnerScheduler, type RegisterRunnerOptions } f
 export { registerRunnerCommand } from "./command.ts";
 export { scheduleRunnerController, runRunnerController } from "./controller.ts";
 export { registerRunnerTool } from "./tool.ts";
-export { RUNNER_ENTRY_TYPE, appendRunEntry, readRun, type RunEntryInput } from "./store.ts";
+export {
+  RUNNER_ENTRY_TYPE,
+  appendCoreEvent,
+  appendFeatureEvent,
+  readFeatureEvents,
+  readRun,
+  type CoreEventInput,
+  type FeatureEventInput,
+} from "./store.ts";
 export { RUNNER_SETUP_MESSAGE_TYPE, RUNNER_WORK_MESSAGE_TYPE } from "./constants.ts";
 
 export type {
   CoreResult,
   ReadyWork,
+  ReadFeatureEventsOptions,
   RollupPromptInput,
-  RunEntry,
-  RunEntryKind,
   RunnerCommandAction,
   RunnerCommandApi,
   RunnerCommandConfig,
   RunnerCommandInput,
+  RunnerCoreEvent,
+  RunnerCoreEventEntry,
   RunnerDefinition,
-  RunnerEntryDraft,
-  RunnerHookInput,
-  RunnerHooks,
+  RunnerEffect,
+  RunnerEffectApi,
+  RunnerEffectEvent,
+  RunnerFeatureEventEntry,
+  RunnerFeatureEventRecord,
   RunnerPolicy,
+  RunnerStoredEntry,
   RunnerToolAction,
   RunnerToolActionInput,
   RunnerToolConfig,

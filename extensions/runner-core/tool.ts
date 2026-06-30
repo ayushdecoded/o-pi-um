@@ -2,15 +2,15 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type TSchema } from "typebox";
 
+import { emitRunnerEvent } from "./effects.ts";
 import { planApprovedText, taskUpdateText } from "./format.ts";
-import { hookInput } from "./hooks.ts";
 import {
   normalizePlan,
   normalizeTaskUpdate,
   type PlanInput,
   type TaskUpdateInput,
 } from "./plan.ts";
-import { appendRunEntry, readRun } from "./store.ts";
+import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
 import { approvePlan, pauseRun, updateTask } from "./transitions.ts";
 import type { RunnerDefinition, RunnerToolAction, RunnerToolResult } from "./types.ts";
 
@@ -48,7 +48,25 @@ async function executeRunnerTool(
   const actionName = typeof params.action === "string" ? params.action : "";
   const action = actions.find((item) => item.action === actionName);
   if (!action) fail(`Unknown ${definition.label} tool action: ${actionName || "<missing>"}.`);
-  return action.execute({ pi, ctx, definition, params, run: readRun(ctx, definition.id) });
+  const run = readRun(ctx, definition.id);
+  return action.execute({
+    pi,
+    ctx,
+    definition,
+    params,
+    run,
+    appendFeatureEvent: (type, payload, namespace = definition.id) => {
+      if (!run) throw new Error(`No ${definition.label} run is active.`);
+      return appendFeatureEvent(pi, ctx, {
+        runnerId: definition.id,
+        runId: run.id,
+        namespace,
+        event: type,
+        payload,
+      });
+    },
+    readFeatureEvents: (options = {}) => readFeatureEvents(ctx, definition.id, options),
+  });
 }
 
 function defaultToolActions(): RunnerToolAction[] {
@@ -80,13 +98,13 @@ async function approvePlanFromTool({
   const clean = normalizePlan(String(params.contract ?? ""), params.plan as PlanInput);
   const approved = approvePlan(run, definition, clean);
   if (!approved.ok) fail(formatIssues(approved.message, approved.issues));
-  appendRunEntry(pi, ctx, {
+  const event = { type: "plan.approved", plan: approved.value.plan! } as const;
+  const entryId = appendCoreEvent(pi, ctx, {
     runnerId: definition.id,
     runId: approved.value.id,
-    kind: "plan-approved",
-    plan: approved.value.plan,
+    event,
   });
-  await definition.hooks?.onPlanApproved?.(hookInput(pi, ctx, definition, approved.value));
+  await emitRunnerEvent(pi, ctx, definition, event, approved.value, entryId);
   return response(planApprovedText(approved.value));
 }
 
@@ -104,34 +122,36 @@ async function updateTaskFromTool({
     if (!run.currentTaskId) fail("No task is currently assigned.");
     if (update.id !== run.currentTaskId)
       fail(`Task ${update.id} is not the current assigned task.`);
-    const paused = pauseRun(run, "task_failed", update.evidence);
-    appendRunEntry(pi, ctx, {
-      runnerId: definition.id,
-      runId: paused.id,
-      kind: "paused",
-      reason: paused.blockedReason,
-      detail: paused.blockedDetail,
+    const failed = pauseRun({ ...run, currentTaskId: undefined }, "task_failed", update.evidence);
+    const event = {
+      type: "task.reported",
       taskId: update.id,
+      result: "failed",
       evidence: update.evidence,
+    } as const;
+    const entryId = appendCoreEvent(pi, ctx, {
+      runnerId: definition.id,
+      runId: failed.id,
+      event,
     });
-    await definition.hooks?.onPaused?.(hookInput(pi, ctx, definition, paused));
+    await emitRunnerEvent(pi, ctx, definition, event, failed, entryId);
     return response(`${definition.label} paused: task ${update.id} failed. ${update.evidence}`);
   }
 
   const updated = updateTask(run, update);
   if (!updated.ok) fail(formatIssues(updated.message, updated.issues));
-  appendRunEntry(pi, ctx, {
+  const event = {
+    type: "task.reported",
+    taskId: update.id,
+    result: "complete",
+    evidence: update.evidence,
+  } as const;
+  const entryId = appendCoreEvent(pi, ctx, {
     runnerId: definition.id,
     runId: updated.value.id,
-    kind: "task-evidence",
-    taskId: update.id,
-    evidence: update.evidence,
+    event,
   });
-  await definition.hooks?.onTaskEvidence?.({
-    ...hookInput(pi, ctx, definition, updated.value),
-    taskId: update.id,
-    evidence: update.evidence,
-  });
+  await emitRunnerEvent(pi, ctx, definition, event, updated.value, entryId);
   return response(taskUpdateText(updated.value));
 }
 
