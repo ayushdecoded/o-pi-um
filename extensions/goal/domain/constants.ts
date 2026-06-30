@@ -1,9 +1,0 @@
-export const MAX_OBJECTIVE_CHARS = 18_000;
-export const GOAL_STATUS_KEY = "goal";
-export const GOAL_STATE_ENTRY_TYPE = "pi-goal-state";
-export const GOAL_SETUP_MESSAGE_TYPE = "pi-goal-setup";
-export const GOAL_WORK_ORDER_MESSAGE_TYPE = "pi-goal-work-order";
-export const GOAL_ROLLUP_MESSAGE_TYPE = "pi-goal-rollup";
-export const HEADLESS_AUTO_APPROVE_ENV = "PI_GOAL_HEADLESS_AUTO_APPROVE";
-export const MAX_SLICE_TASKS = 7;
-export const MAX_PLANNED_SLICES = 8;

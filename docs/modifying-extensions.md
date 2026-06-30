@@ -13,7 +13,9 @@ Keep extensions and package skills small, explicit, and easy for models to use.
 ## Boundaries
 
 ```text
-goal        goal lifecycle, state, UI, accounting
+runner-core durable dependency-graph work runs over Pi session primitives
+goal        Goal runner definition/prompts
+robopi      RoboPi runner definition/prompts
 subagent    child Pi sessions, model routing, child usage
 compaction  routed model selection for native Pi compaction
 footer      TUI footer usage/status display
@@ -79,7 +81,7 @@ package-lock.json
 
 ## Extension docs
 
-- `extensions/goal/docs/`
+- `extensions/runner-core/README.md`
 - `extensions/subagent/docs/`
 - `extensions/compaction/README.md`
 - `extensions/browser/docs/`
