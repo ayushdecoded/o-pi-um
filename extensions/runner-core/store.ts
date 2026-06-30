@@ -1,5 +1,14 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 
+import { RUNNER_WORK_MESSAGE_TYPE } from "./constants.ts";
+import { normalizePlan } from "./plan.ts";
+import {
+  isPlanComplete,
+  isTaskComplete,
+  isUnitWorkComplete,
+  nextReadyTask,
+  validatePlan,
+} from "./graph.ts";
 import type {
   ReadFeatureEventsOptions,
   RunnerCoreEvent,
@@ -8,6 +17,7 @@ import type {
   RunnerFeatureEventRecord,
   RunnerStoredEntry,
   RunState,
+  UnitRollupTask,
   UnitSummary,
   WorkPlan,
 } from "./types.ts";
@@ -20,13 +30,17 @@ export function readRun(ctx: ExtensionContext, runnerId: string): RunState | nul
   let run: RunState | null = null;
   for (const entry of ctx.sessionManager.getBranch()) {
     const stored = parseRunnerEntry(entry);
-    if (!stored || stored.scope !== "core" || stored.runnerId !== runnerId) continue;
+    if (!stored || stored.scope !== "core" || stored.runnerId !== runnerId) {
+      if (run) applyLegacyWorkPacketEntry(run, entry);
+      continue;
+    }
     if (stored.event.type === "run.created") run = runFromCreated(stored, stored.event);
     else if (stored.event.type === "run.cleared") {
       if (run?.id === stored.runId) run = null;
     } else if (run?.id === stored.runId) {
       applyCoreEvent(run, stored, entry.id);
     }
+    if (run) applyLegacyWorkPacketEntry(run, entry);
   }
   return run;
 }
@@ -113,8 +127,10 @@ function runFromCreated(
 }
 
 function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: string): void {
-  run.updatedAt = entry.timestamp;
   const event = entry.event;
+  const issue = validateCoreEvent(run, event);
+  if (issue) return pauseForInvalidEvent(run, entry, issue);
+  run.updatedAt = entry.timestamp;
   if (event.type === "plan.approved") {
     run.status = "active";
     run.plan = clonePlan(event.plan);
@@ -124,7 +140,12 @@ function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: str
     run.currentUnitId = event.unitId;
     run.currentTaskId = event.taskId;
     const unit = run.plan?.units.find((item) => item.id === event.unitId);
-    if (unit && !unit.startEntryId) unit.startEntryId = entryId;
+    if (unit && !unit.runner?.startEntryId)
+      unit.runner = { ...(unit.runner ?? {}), startEntryId: entryId };
+    return;
+  }
+  if (event.type === "task.packet_sent") {
+    run.currentTaskPacketEntryId = entryId;
     return;
   }
   if (event.type === "task.reported") {
@@ -139,15 +160,22 @@ function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: str
       run.blockedDetail = event.evidence;
     }
     if (run.currentTaskId === event.taskId) run.currentTaskId = undefined;
+    run.currentTaskPacketEntryId = undefined;
     return;
   }
   if (event.type === "unit.rolled_up") {
+    if (event.tasks) applyRolledUpTaskFacts(run, event.unitId, event.tasks);
     const summary = summaryFromEntry(entry);
     run.summaries.push(summary);
     const unit = run.plan?.units.find((item) => item.id === event.unitId);
-    if (unit) unit.summaryEntryId = event.summaryEntryId ?? `rolled-up:${event.unitId}`;
+    if (unit)
+      unit.runner = {
+        ...(unit.runner ?? {}),
+        summaryEntryId: event.summaryEntryId ?? `rolled-up:${event.unitId}`,
+      };
     if (run.currentUnitId === event.unitId) run.currentUnitId = undefined;
     run.currentTaskId = undefined;
+    run.currentTaskPacketEntryId = undefined;
     return;
   }
   if (event.type === "run.paused") {
@@ -168,6 +196,71 @@ function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: str
     run.blockedReason = undefined;
     run.blockedDetail = undefined;
   }
+}
+
+function validateCoreEvent(run: RunState, event: RunnerCoreEvent): string | null {
+  if (run.blockedReason === "invalid_event") return "run already has invalid replay state";
+  if (event.type === "plan.approved") {
+    if (run.status !== "setup") return "plan approval is only valid during setup";
+    const validation = validatePlan(event.plan);
+    return validation.ok ? null : validation.message;
+  }
+  if (event.type === "task.assigned") {
+    if (run.status !== "active" || !run.plan) return "task assignment needs an active plan";
+    if (run.currentTaskId) return "another task is already assigned";
+    const ready = nextReadyTask(run);
+    return ready?.unit.id === event.unitId && ready.task.id === event.taskId
+      ? null
+      : `task ${event.taskId} is not ready`;
+  }
+  if (event.type === "task.packet_sent") {
+    if (run.status !== "active" || !run.plan) return "task packet needs an active plan";
+    if (event.taskId !== run.currentTaskId || event.unitId !== run.currentUnitId)
+      return `task packet ${event.taskId} is not assigned`;
+    return null;
+  }
+  if (event.type === "task.reported") {
+    if (run.status !== "active" || !run.plan) return "task report needs an active plan";
+    if (event.taskId !== run.currentTaskId) return `task ${event.taskId} is not assigned`;
+    if (!event.evidence.trim()) return "task report needs evidence";
+    const task = findTask(run, event.taskId);
+    if (!task) return `unknown task ${event.taskId}`;
+    if (event.result === "complete" && isTaskComplete(task))
+      return `task ${event.taskId} is already complete`;
+    return null;
+  }
+  if (event.type === "unit.rolled_up") {
+    if (run.status !== "active" || !run.plan) return "unit rollup needs an active plan";
+    if (run.currentUnitId !== event.unitId) return `unit ${event.unitId} is not current`;
+    const unit = findUnit(run, event.unitId);
+    if (!unit) return `unknown unit ${event.unitId}`;
+    if (unit.runner?.summaryEntryId) return `unit ${event.unitId} is already rolled up`;
+    // Legacy compacted branches may retain only the unit rollup fact after task
+    // evidence was summarized away. New events include task facts and are fully
+    // checked before the rollup is accepted as a completion boundary.
+    return event.tasks ? validateRollupTasks(unit, event.tasks) : null;
+  }
+  if (event.type === "run.paused")
+    return run.status === "active" || run.status === "setup" ? null : "run is not pausable";
+  if (event.type === "run.resumed")
+    return run.status === "paused" && Boolean(run.plan) ? null : "run is not resumable";
+  if (event.type === "run.completed") return isPlanComplete(run) ? null : "plan is not complete";
+  return null;
+}
+
+function pauseForInvalidEvent(run: RunState, entry: RunnerCoreEventEntry, issue: string): void {
+  if (run.status === "complete") return;
+  run.status = "paused";
+  run.blockedReason = "invalid_event";
+  run.blockedDetail = `${entry.event.type}: ${issue}`;
+  run.updatedAt = entry.timestamp;
+}
+
+function applyLegacyWorkPacketEntry(run: RunState, entry: SessionEntry): void {
+  if (entry.type !== "custom_message" || entry.customType !== RUNNER_WORK_MESSAGE_TYPE) return;
+  const details = (entry as { details?: Record<string, unknown> }).details;
+  if (details?.runnerId !== run.runnerId || details.runId !== run.id) return;
+  if (details.taskId === run.currentTaskId) run.currentTaskPacketEntryId = entry.id;
 }
 
 function summaryFromEntry(entry: RunnerCoreEventEntry): UnitSummary {
@@ -197,7 +290,7 @@ function parseRunnerEntry(entry: SessionEntry): RunnerStoredEntry | null {
       runnerId: data.runnerId,
       runId: data.runId,
       timestamp,
-      event: clone(data.event),
+      event: normalizeCoreEvent(data.event),
     };
   }
   if (
@@ -217,6 +310,10 @@ function parseRunnerEntry(entry: SessionEntry): RunnerStoredEntry | null {
     };
   }
   return parseLegacyCoreEntry(data, timestamp);
+}
+
+function normalizeCoreEvent(event: RunnerCoreEvent): RunnerCoreEvent {
+  return event.type === "plan.approved" ? { ...event, plan: clonePlan(event.plan) } : clone(event);
 }
 
 function parseLegacyCoreEntry(
@@ -294,6 +391,8 @@ function isCoreEvent(value: unknown): value is RunnerCoreEvent {
   if (value.type === "plan.approved") return isPlan(value.plan);
   if (value.type === "task.assigned")
     return typeof value.unitId === "string" && typeof value.taskId === "string";
+  if (value.type === "task.packet_sent")
+    return typeof value.unitId === "string" && typeof value.taskId === "string";
   if (value.type === "task.reported") {
     return (
       typeof value.taskId === "string" &&
@@ -301,17 +400,83 @@ function isCoreEvent(value: unknown): value is RunnerCoreEvent {
       typeof value.evidence === "string"
     );
   }
-  if (value.type === "unit.rolled_up") return typeof value.unitId === "string";
+  if (value.type === "unit.rolled_up") {
+    return (
+      typeof value.unitId === "string" &&
+      (value.tasks === undefined ||
+        (Array.isArray(value.tasks) && value.tasks.every(isRollupTask))) &&
+      (value.summaryEntryId === undefined || typeof value.summaryEntryId === "string") &&
+      (value.summary === undefined || typeof value.summary === "string")
+    );
+  }
   if (value.type === "run.paused") return typeof value.reason === "string";
   return ["run.resumed", "run.completed", "run.cleared"].includes(value.type);
 }
 
+function applyRolledUpTaskFacts(run: RunState, unitId: string, tasks: UnitRollupTask[]): void {
+  const unit = findUnit(run, unitId);
+  if (!unit) return;
+  for (const fact of tasks) {
+    const task = unit.tasks.find((item) => item.id === fact.id);
+    if (task && fact.evidence?.trim()) task.evidence = fact.evidence;
+  }
+}
+
+function validateRollupTasks(
+  unit: NonNullable<RunState["plan"]>["units"][number],
+  tasks: UnitRollupTask[],
+): string | null {
+  const expected = new Set(unit.tasks.map((task) => task.id));
+  const seen = new Set<string>();
+  for (const fact of tasks) {
+    if (!expected.has(fact.id)) return `rollup includes unknown task ${fact.id}`;
+    if (seen.has(fact.id)) return `rollup includes duplicate task ${fact.id}`;
+    seen.add(fact.id);
+    if (!fact.evidence?.trim()) return `rollup task ${fact.id} needs evidence`;
+  }
+  for (const taskId of expected) if (!seen.has(taskId)) return `rollup is missing task ${taskId}`;
+  return null;
+}
+
+function isRollupTask(value: unknown): value is UnitRollupTask {
+  return isRecord(value) && typeof value.id === "string" && typeof value.evidence === "string";
+}
+
 function isPlan(value: unknown): value is WorkPlan {
-  return isRecord(value) && typeof value.contract === "string" && Array.isArray(value.units);
+  if (!isRecord(value) || typeof value.contract !== "string" || !Array.isArray(value.units))
+    return false;
+  return value.units.every(
+    (unit) =>
+      isRecord(unit) &&
+      typeof unit.id === "string" &&
+      typeof unit.name === "string" &&
+      typeof unit.objective === "string" &&
+      (!("dependsOn" in unit) || Array.isArray(unit.dependsOn)) &&
+      Array.isArray(unit.tasks) &&
+      unit.tasks.every(
+        (task) =>
+          isRecord(task) &&
+          typeof task.id === "string" &&
+          typeof task.name === "string" &&
+          typeof task.objective === "string" &&
+          typeof task.verification === "string" &&
+          (!("dependsOn" in task) || Array.isArray(task.dependsOn)),
+      ),
+  );
+}
+
+function findUnit(run: RunState, id: string) {
+  return run.plan?.units.find((unit) => unit.id === id);
+}
+
+function findTask(run: RunState, id: string) {
+  return run.plan?.units.flatMap((unit) => unit.tasks).find((task) => task.id === id);
 }
 
 function clonePlan(plan: WorkPlan): WorkPlan {
-  return clone(plan);
+  // Stored plan entries may come from older schemas where dependsOn was omitted;
+  // normalize on replay so graph validation always receives strict arrays.
+  return normalizePlan(plan.contract, plan);
 }
 
 function clone<T>(value: T): T {

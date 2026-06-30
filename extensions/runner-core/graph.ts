@@ -3,6 +3,7 @@ import type {
   ReadyWork,
   RunState,
   RunnerPolicy,
+  RunWorkUnit,
   WorkPlan,
   WorkTask,
   WorkUnit,
@@ -59,8 +60,8 @@ export function isUnitWorkComplete(unit: WorkUnit): boolean {
   return unit.tasks.length > 0 && unit.tasks.every(isTaskComplete);
 }
 
-export function isUnitRolledUp(unit: WorkUnit): boolean {
-  return Boolean(unit.summaryEntryId);
+export function isUnitRolledUp(unit: WorkUnit | RunWorkUnit): boolean {
+  return Boolean((unit as RunWorkUnit).runner?.summaryEntryId);
 }
 
 export function isPlanComplete(run: RunState): boolean {

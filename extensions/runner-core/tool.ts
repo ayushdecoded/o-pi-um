@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type TSchema } from "typebox";
 
+import { RUNNER_SETUP_MESSAGE_TYPE, RUNNER_WORK_MESSAGE_TYPE } from "./constants.ts";
 import { emitRunnerEvent } from "./effects.ts";
 import { planApprovedText, taskUpdateText } from "./format.ts";
 import {
@@ -29,7 +30,9 @@ export function registerRunnerTool(pi: ExtensionAPI, definition: RunnerDefinitio
     name: toolName,
     label: definition.label,
     description: definition.tool.description ?? `${definition.label} work state`,
-    promptSnippet: `${definition.label}: approve the plan; during work, report whether the assigned task completed or failed.`,
+    promptSnippet:
+      definition.tool.promptSnippet ??
+      `${definition.label}: use this runner tool for ${actions.map((action) => action.action).join("/")}.`,
     promptGuidelines: promptGuidelines(toolName, actions),
     parameters: parametersFor(actions),
     executionMode: "sequential",
@@ -50,6 +53,13 @@ async function executeRunnerTool(
   const action = actions.find((item) => item.action === actionName);
   if (!action) fail(`Unknown ${definition.label} tool action: ${actionName || "<missing>"}.`);
   const run = readRun(ctx, definition.id);
+  const packet = currentRunnerPacket(ctx, definition);
+  // Custom actions are run-bound by default too; actions that intentionally work
+  // without an active run must opt out with requireRunId:false.
+  if (action.requireRunId !== false) {
+    if (!run) fail(`No ${definition.label} run is active.`);
+    assertPacketMatchesRun(packet, run, definition);
+  }
   return action.execute({
     pi,
     ctx,
@@ -96,6 +106,7 @@ async function approvePlanFromTool({
   run,
 }: Parameters<RunnerToolAction["execute"]>[0]): Promise<RunnerToolResult> {
   if (!run || run.status !== "setup") fail(`No ${definition.label} setup is active.`);
+  assertPacketMatchesRun(currentRunnerPacket(ctx, definition), run, definition, "setup");
   const clean = normalizePlan(String(params.contract ?? ""), params.plan as PlanInput);
   const approved = approvePlan(run, definition, clean);
   if (!approved.ok) fail(formatIssues(approved.message, approved.issues));
@@ -118,12 +129,15 @@ async function updateTaskFromTool({
   run,
 }: Parameters<RunnerToolAction["execute"]>[0]): Promise<RunnerToolResult> {
   if (!run || run.status !== "active") fail(`No active ${definition.label} run.`);
+  const packet = currentRunnerPacket(ctx, definition);
+  assertPacketMatchesRun(packet, run, definition, "work");
   const update = normalizeTaskUpdate(params as TaskUpdateInput);
   if (!update?.evidence) fail("Provide task evidence for the assigned task.");
   if (params.result === "failed") {
     if (!run.currentTaskId) fail("No task is currently assigned.");
     if (update.id !== run.currentTaskId)
       fail(`Task ${update.id} is not the current assigned task.`);
+    assertPacketTaskMatches(packet, update.id, definition);
     const failed = pauseRun({ ...run, currentTaskId: undefined }, "task_failed", update.evidence);
     const event = {
       type: "task.reported",
@@ -141,6 +155,7 @@ async function updateTaskFromTool({
     return response(`${definition.label} paused: task ${update.id} failed. ${update.evidence}`);
   }
 
+  assertPacketTaskMatches(packet, update.id, definition);
   const updated = updateTask(run, update);
   if (!updated.ok) fail(formatIssues(updated.message, updated.issues));
   const event = {
@@ -174,8 +189,69 @@ function promptGuidelines(toolName: string, actions: RunnerToolAction[]): string
 
 function parametersFor(actions: RunnerToolAction[]): TSchema {
   if (actions.length === 0) throw new Error("Runner tool has no actions.");
-  const schemas = actions.map((action) => action.parameters as TSchema);
+  const schemas = actions.map((action) => schemaForAction(action));
   return schemas.length === 1 ? schemas[0] : Type.Union(schemas);
+}
+
+function schemaForAction(action: RunnerToolAction): TSchema {
+  const schema = action.parameters as TSchema & {
+    type?: unknown;
+    properties?: Record<string, TSchema>;
+    required?: string[];
+    additionalProperties?: boolean;
+  };
+  return schema;
+}
+
+type RunnerPacket = { phase?: string; runId?: string; taskId?: string };
+
+function currentRunnerPacket(
+  ctx: ExtensionContext,
+  definition: RunnerDefinition,
+): RunnerPacket | null {
+  const branch = ctx.sessionManager.getBranch();
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    const entry = branch[index] as {
+      type?: unknown;
+      customType?: unknown;
+      details?: Record<string, unknown>;
+    };
+    if (
+      entry.type !== "custom_message" ||
+      (entry.customType !== RUNNER_SETUP_MESSAGE_TYPE &&
+        entry.customType !== RUNNER_WORK_MESSAGE_TYPE)
+    )
+      continue;
+    const details = entry.details;
+    if (details?.runnerId !== definition.id) continue;
+    return {
+      phase: typeof details.phase === "string" ? details.phase : undefined,
+      runId: typeof details.runId === "string" ? details.runId : undefined,
+      taskId: typeof details.taskId === "string" ? details.taskId : undefined,
+    };
+  }
+  return null;
+}
+
+function assertPacketMatchesRun(
+  packet: RunnerPacket | null,
+  run: { id: string },
+  definition: RunnerDefinition,
+  phase?: "setup" | "work",
+): void {
+  if (!packet?.runId) fail(`${definition.label} tool call is not attached to a runner packet.`);
+  if (packet.runId !== run.id) fail(`Stale ${definition.label} tool call for run ${packet.runId}.`);
+  if (phase && packet.phase !== phase)
+    fail(`${definition.label} ${phase} action came from a ${packet.phase ?? "unknown"} packet.`);
+}
+
+function assertPacketTaskMatches(
+  packet: RunnerPacket | null,
+  taskId: string,
+  definition: RunnerDefinition,
+): void {
+  if (packet?.taskId !== taskId)
+    fail(`Stale ${definition.label} tool call for task ${String(packet?.taskId ?? "<missing>")}.`);
 }
 
 function response(text: string): RunnerToolResult {

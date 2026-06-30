@@ -6,7 +6,7 @@ import type {
 
 import { RUNNER_SETUP_MESSAGE_TYPE, RUNNER_WORK_MESSAGE_TYPE } from "./constants.ts";
 import { emitRunnerEvent } from "./effects.ts";
-import { isPlanComplete } from "./graph.ts";
+import { isPlanComplete, nextReadyTask } from "./graph.ts";
 import { sendTurn } from "./messages.ts";
 import { completeIfReady, pauseAndAppend, rollUpReadyUnit } from "./rollup.ts";
 import {
@@ -20,7 +20,7 @@ import {
 import { appendCoreEvent, readRun } from "./store.ts";
 import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { hasAssignedIncompleteTask, startNextWork, unitReadyToRollUp } from "./transitions.ts";
-import type { ReadyWork, RunnerDefinition, RunState } from "./types.ts";
+import type { ReadyWork, RunnerDefinition, RunState, WorkUnit } from "./types.ts";
 
 export { rememberRunnerContext, resetRunnerContext, turnInProgressReason } from "./runtime.ts";
 
@@ -109,6 +109,10 @@ async function controllerStep(
 
   const workflow = definition.workflow ?? {};
   if (hasAssignedIncompleteTask(run)) return;
+  if (run.currentTaskId && !run.currentTaskPacketEntryId) {
+    const assigned = nextReadyTask(run);
+    if (assigned) return sendAssignedWorkTurn(pi, definition, ctx, run, assigned);
+  }
 
   const unit = (workflow.unitReadyToRollUp ?? unitReadyToRollUp)(run);
   if (unit) {
@@ -128,7 +132,7 @@ async function controllerStep(
 }
 
 function sendSetupTurn(pi: ExtensionAPI, definition: RunnerDefinition, run: RunState): void {
-  sendTurn(pi, RUNNER_SETUP_MESSAGE_TYPE, definition.setupPrompt({ run }), {
+  sendTurn(pi, RUNNER_SETUP_MESSAGE_TYPE, definition.setupPrompt({ run: publicRun(run) }), {
     runnerId: definition.id,
     runId: run.id,
     phase: "setup",
@@ -150,10 +154,25 @@ async function sendWorkTurn(
   });
   const afterAppend = readRun(ctx, definition.id) ?? run;
   await emitRunnerEvent(pi, ctx, definition, event, afterAppend, entryId);
+  sendAssignedWorkTurn(pi, definition, ctx, afterAppend, work);
+}
+
+function sendAssignedWorkTurn(
+  pi: ExtensionAPI,
+  definition: RunnerDefinition,
+  ctx: ExtensionCommandContext,
+  run: RunState,
+  work: ReadyWork,
+): void {
   sendTurn(
     pi,
     RUNNER_WORK_MESSAGE_TYPE,
-    definition.workPrompt({ run: afterAppend, ...work, summaries: afterAppend.summaries }),
+    definition.workPrompt({
+      run: publicRun(run),
+      unit: publicUnit(work.unit),
+      task: work.task,
+      summaries: run.summaries,
+    }),
     {
       runnerId: definition.id,
       runId: run.id,
@@ -162,6 +181,40 @@ async function sendWorkTurn(
       taskId: work.task.id,
     },
   );
+  // This event is intentionally after sendTurn: if delivery crashes, replay lacks
+  // task.packet_sent and the controller can resend the already-assigned task.
+  appendCoreEvent(pi, ctx, {
+    runnerId: definition.id,
+    runId: run.id,
+    event: { type: "task.packet_sent", unitId: work.unit.id, taskId: work.task.id },
+  });
+}
+
+function publicRun(run: RunState) {
+  const {
+    plan,
+    currentTaskPacketEntryId: _packet,
+    currentTaskId: _task,
+    currentUnitId: _unit,
+    metadata: _metadata,
+    ...rest
+  } = run;
+  return {
+    ...rest,
+    ...(plan
+      ? {
+          plan: {
+            contract: plan.contract,
+            units: plan.units.map(publicUnit),
+          },
+        }
+      : {}),
+  };
+}
+
+function publicUnit(unit: ReadyWork["unit"]): WorkUnit {
+  const { runner: _runner, ...publicFields } = unit;
+  return publicFields;
 }
 
 function readCurrentRun(

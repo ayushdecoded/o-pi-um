@@ -13,10 +13,11 @@ import type {
   ReadyWork,
   RunState,
   RunnerDefinition,
+  RunPlan,
+  RunWorkUnit,
   UnitSummary,
   WorkPlan,
   WorkTask,
-  WorkUnit,
 } from "./types.ts";
 
 export function createRun(
@@ -79,7 +80,7 @@ export function updateTask(
   const plan = clone(run.plan);
   const issue = applyTaskEvidence(plan, run, update);
   if (issue) return fail(issue);
-  return ok(touch({ ...run, plan, currentTaskId: undefined }));
+  return ok(touch({ ...run, plan, currentTaskId: undefined, currentTaskPacketEntryId: undefined }));
 }
 
 export function rollUpUnit(
@@ -96,10 +97,21 @@ export function rollUpUnit(
   if (isUnitRolledUp(unit)) return fail(`Unit ${unitId} is already rolled up.`);
   if (!isUnitWorkComplete(unit)) return fail(`Unit ${unitId} is not complete yet.`);
 
-  if (summary?.summaryEntryId) unit.summaryEntryId = summary.summaryEntryId;
-  else unit.summaryEntryId = `rolled-up:${unitId}`;
+  unit.runner = {
+    ...(unit.runner ?? {}),
+    summaryEntryId: summary?.summaryEntryId ?? `rolled-up:${unitId}`,
+  };
   const summaries = [...run.summaries, { unitId, createdAt: nowSeconds(), ...summary }];
-  return ok(touch({ ...run, plan, currentUnitId: undefined, currentTaskId: undefined, summaries }));
+  return ok(
+    touch({
+      ...run,
+      plan,
+      currentUnitId: undefined,
+      currentTaskId: undefined,
+      currentTaskPacketEntryId: undefined,
+      summaries,
+    }),
+  );
 }
 
 export function finishIfComplete(run: RunState): CoreResult<RunState> {
@@ -127,11 +139,11 @@ export function resumeRun(run: RunState): CoreResult<RunState> {
   );
 }
 
-export function currentUnit(run: RunState): WorkUnit | undefined {
+export function currentUnit(run: RunState): RunWorkUnit | undefined {
   return run.plan?.units.find((unit) => unit.id === run.currentUnitId);
 }
 
-export function unitReadyToRollUp(run: RunState): WorkUnit | null {
+export function unitReadyToRollUp(run: RunState): RunWorkUnit | null {
   const unit = currentUnit(run);
   return unit && !isUnitRolledUp(unit) && isUnitWorkComplete(unit) ? unit : null;
 }
@@ -139,11 +151,11 @@ export function unitReadyToRollUp(run: RunState): WorkUnit | null {
 export function hasAssignedIncompleteTask(run: RunState): boolean {
   if (!run.currentTaskId || !run.plan) return false;
   const task = findTask(run.plan, run.currentTaskId);
-  return Boolean(task && !isTaskComplete(task));
+  return Boolean(task && !isTaskComplete(task) && run.currentTaskPacketEntryId);
 }
 
 function applyTaskEvidence(
-  plan: WorkPlan,
+  plan: RunPlan,
   run: RunState,
   update: Pick<WorkTask, "id" | "evidence">,
 ): string | null {
@@ -181,15 +193,15 @@ function resetPlanProgress(plan: WorkPlan): WorkPlan {
   };
 }
 
-function unitForTask(plan: WorkPlan, taskId: string): WorkUnit | undefined {
+function unitForTask(plan: RunPlan, taskId: string): RunWorkUnit | undefined {
   return plan.units.find((unit) => unit.tasks.some((task) => task.id === taskId));
 }
 
-function findUnit(plan: WorkPlan, id: string): WorkUnit | undefined {
+function findUnit(plan: RunPlan, id: string): RunWorkUnit | undefined {
   return plan.units.find((unit) => unit.id === id);
 }
 
-function findTask(plan: WorkPlan, id: string): WorkTask | undefined {
+function findTask(plan: RunPlan, id: string): WorkTask | undefined {
   return plan.units.flatMap((unit) => unit.tasks).find((task) => task.id === id);
 }
 
