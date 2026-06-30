@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { scheduleRunnerController, resetRunnerContext } from "./controller.ts";
 import { registerRunnerCommand } from "./command.ts";
 import { registerRunnerTool } from "./tool.ts";
+import { clearRunnerTool, rememberRunnerTool } from "./tool-scope.ts";
 import type { RunnerDefinition } from "./types.ts";
 
 export type RegisterRunnerOptions = {
@@ -22,6 +23,7 @@ export function registerRunner(
   definition: RunnerDefinition,
   options: RegisterRunnerOptions = {},
 ): void {
+  rememberRunnerTool(definition);
   if (options.command !== false) registerRunnerCommand(pi, definition);
   if (options.tool !== false) registerRunnerTool(pi, definition);
   if (options.scheduler !== false) registerRunnerScheduler(pi, definition);
@@ -32,7 +34,12 @@ export function registerRunnerScheduler(pi: ExtensionAPI, definition: RunnerDefi
     scheduleRunnerController(pi, definition, ctx);
   });
 
+  pi.on("session_tree", async (_event, ctx) => {
+    scheduleRunnerController(pi, definition, ctx);
+  });
+
   pi.on("session_shutdown", async (_event, ctx) => {
+    clearRunnerTool(pi, ctx, definition);
     resetRunnerContext(definition, ctx);
   });
 }

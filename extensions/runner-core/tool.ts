@@ -11,6 +11,7 @@ import {
   type TaskUpdateInput,
 } from "./plan.ts";
 import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
+import { activateRunnerTool, clearRunnerTool, rememberRunnerTool } from "./tool-scope.ts";
 import { approvePlan, pauseRun, updateTask } from "./transitions.ts";
 import type { RunnerDefinition, RunnerToolAction, RunnerToolResult } from "./types.ts";
 
@@ -22,6 +23,7 @@ export type RunnerToolParams =
 // evidence. Evidence is explicit: the assigned task either completed or failed.
 // Feature definitions can add/override actions without forking the base tool protocol.
 export function registerRunnerTool(pi: ExtensionAPI, definition: RunnerDefinition): void {
+  rememberRunnerTool(definition);
   const toolName = definition.tool.name;
   const actions = toolActions(definition);
   pi.registerTool({
@@ -105,6 +107,7 @@ async function approvePlanFromTool({
     event,
   });
   await emitRunnerEvent(pi, ctx, definition, event, approved.value, entryId);
+  activateRunnerTool(pi, ctx, definition);
   return response(planApprovedText(approved.value));
 }
 
@@ -135,6 +138,7 @@ async function updateTaskFromTool({
       event,
     });
     await emitRunnerEvent(pi, ctx, definition, event, failed, entryId);
+    clearRunnerTool(pi, ctx, definition);
     return response(`${definition.label} paused: task ${update.id} failed. ${update.evidence}`);
   }
 
@@ -157,10 +161,22 @@ async function updateTaskFromTool({
 
 function toolActions(definition: RunnerDefinition): RunnerToolAction[] {
   const defaults = definition.tool.includeDefaultActions === false ? [] : defaultToolActions();
-  const actions = [...defaults, ...(definition.tool.actions ?? [])];
   const byName = new Map<string, RunnerToolAction>();
-  for (const action of actions) byName.set(action.action, action);
+  for (const action of defaults) addToolAction(byName, action, false);
+  for (const action of definition.tool.actions ?? []) addToolAction(byName, action, true);
   return [...byName.values()];
+}
+
+function addToolAction(
+  byName: Map<string, RunnerToolAction>,
+  action: RunnerToolAction,
+  custom: boolean,
+): void {
+  const existing = byName.get(action.action);
+  if (existing && custom && !action.override) {
+    throw new Error(`Tool action ${action.action} overrides a default; set override:true.`);
+  }
+  byName.set(action.action, action);
 }
 
 function promptGuidelines(toolName: string, actions: RunnerToolAction[]): string[] {

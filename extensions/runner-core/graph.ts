@@ -8,7 +8,7 @@ import type {
   WorkUnit,
 } from "./types.ts";
 
-export type PlanValidationOptions = { policy?: RunnerPolicy };
+export type PlanValidationOptions = { policy?: RunnerPolicy; enforceSafeIds?: boolean };
 
 // Validate the model-created plan before activation. The model chooses the order;
 // core enforces a rollup-friendly shape: earlier units only, local earlier task deps only.
@@ -23,7 +23,7 @@ export function validatePlan(
   const allIds = new Set<string>();
   const unitOrder = new Map<string, number>();
   for (const [index, unit] of plan.units.entries())
-    collectUnit(unit, index, allIds, unitOrder, issues, options.policy);
+    collectUnit(unit, index, allIds, unitOrder, issues, options);
   for (const [index, unit] of plan.units.entries())
     validateUnitDeps(unit, index, unitOrder, issues);
 
@@ -73,23 +73,23 @@ function collectUnit(
   allIds: Set<string>,
   unitOrder: Map<string, number>,
   issues: string[],
-  policy: RunnerPolicy | undefined,
+  options: PlanValidationOptions,
 ): void {
-  collectId(unit.id, "unit", allIds, issues);
+  collectId(unit.id, "unit", allIds, issues, options);
   unitOrder.set(unit.id, unitIndex);
   if (!unit.name.trim()) issues.push(`Unit ${unit.id || "<missing>"} needs a name.`);
   if (!unit.objective.trim()) issues.push(`Unit ${unit.id || "<missing>"} needs an objective.`);
   if (unit.tasks.length === 0)
     issues.push(`Unit ${unit.id || "<missing>"} needs at least one task.`);
-  if (policy?.maxTasksPerUnit && unit.tasks.length > policy.maxTasksPerUnit) {
+  if (options.policy?.maxTasksPerUnit && unit.tasks.length > options.policy.maxTasksPerUnit) {
     issues.push(
-      `Unit ${unit.id} has ${unit.tasks.length} tasks; max is ${policy.maxTasksPerUnit}.`,
+      `Unit ${unit.id} has ${unit.tasks.length} tasks; max is ${options.policy.maxTasksPerUnit}.`,
     );
   }
 
   const localTaskOrder = new Map<string, number>();
   for (const [taskIndex, task] of unit.tasks.entries())
-    collectTask(task, taskIndex, allIds, localTaskOrder, issues);
+    collectTask(task, taskIndex, allIds, localTaskOrder, issues, options);
   for (const [taskIndex, task] of unit.tasks.entries())
     validateTaskDeps(task, taskIndex, localTaskOrder, issues);
 }
@@ -100,8 +100,9 @@ function collectTask(
   allIds: Set<string>,
   localTaskOrder: Map<string, number>,
   issues: string[],
+  options: PlanValidationOptions,
 ): void {
-  collectId(task.id, "task", allIds, issues);
+  collectId(task.id, "task", allIds, issues, options);
   localTaskOrder.set(task.id, taskIndex);
   if (!task.name.trim()) issues.push(`Task ${task.id || "<missing>"} needs a name.`);
   if (!task.objective.trim()) issues.push(`Task ${task.id || "<missing>"} needs an objective.`);
@@ -157,11 +158,19 @@ function findTask(plan: WorkPlan, taskId: string): ReadyWork | null {
   return null;
 }
 
-function collectId(id: string, kind: string, ids: Set<string>, issues: string[]): void {
+function collectId(
+  id: string,
+  kind: string,
+  ids: Set<string>,
+  issues: string[],
+  options: PlanValidationOptions,
+): void {
   if (!id.trim()) {
     issues.push(`${kind} id must not be empty.`);
     return;
   }
+  if (options.enforceSafeIds !== false && !/^[A-Za-z0-9._-]+$/.test(id))
+    issues.push(`${kind} id ${id} must use only letters, numbers, dot, underscore, or dash.`);
   if (ids.has(id)) issues.push(`Duplicate node id ${id}.`);
   ids.add(id);
 }

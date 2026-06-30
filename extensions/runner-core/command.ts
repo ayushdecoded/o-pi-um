@@ -9,6 +9,7 @@ import { rememberRunnerContext, runRunnerController, turnInProgressReason } from
 import { emitRunnerEvent } from "./effects.ts";
 import { runStatusText } from "./format.ts";
 import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
+import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { createRun, pauseRun, resumeRun } from "./transitions.ts";
 import type {
   RunnerCommandAction,
@@ -21,6 +22,7 @@ import type {
 // Generic slash-command shell. Core provides normal runner actions; features can
 // add or override actions without forking state, scheduling, or rollup behavior.
 export function registerRunnerCommand(pi: ExtensionAPI, definition: RunnerDefinition): void {
+  commandActions(definition);
   pi.registerCommand(definition.command.name, {
     description: definition.command.description ?? `Start or control ${definition.label}`,
     getArgumentCompletions: (prefix) => completeArgs(definition, prefix),
@@ -110,7 +112,12 @@ async function startCommand(input: RunnerCommandInput, api: RunnerCommandApi): P
     await emitRunnerEvent(api.pi, api.ctx, api.definition, event, existing, entryId);
   }
 
-  const run = createRun(api.definition, intent);
+  const metadata = await api.definition.createRunMetadata?.({
+    intent,
+    ctx: api.ctx,
+    definition: api.definition,
+  });
+  const run = createRun(api.definition, intent, metadata);
   const event = { type: "run.created", intent: run.intent, metadata: run.metadata } as const;
   const entryId = appendCoreEvent(api.pi, api.ctx, {
     runnerId: api.definition.id,
@@ -118,6 +125,7 @@ async function startCommand(input: RunnerCommandInput, api: RunnerCommandApi): P
     event,
   });
   await emitRunnerEvent(api.pi, api.ctx, api.definition, event, run, entryId);
+  activateRunnerTool(api.pi, api.ctx, api.definition);
   api.ctx.ui.notify(`${api.definition.label} setup started.`, "info");
   await api.runController();
 }
@@ -140,6 +148,7 @@ async function pauseCommand(_input: RunnerCommandInput, api: RunnerCommandApi): 
     event,
   });
   await emitRunnerEvent(api.pi, api.ctx, api.definition, event, paused, entryId);
+  clearRunnerTool(api.pi, api.ctx, api.definition);
 }
 
 async function clearCommand(_input: RunnerCommandInput, api: RunnerCommandApi): Promise<void> {
@@ -152,6 +161,7 @@ async function clearCommand(_input: RunnerCommandInput, api: RunnerCommandApi): 
     event,
   });
   await emitRunnerEvent(api.pi, api.ctx, api.definition, event, run, entryId);
+  clearRunnerTool(api.pi, api.ctx, api.definition);
   api.ctx.ui.notify(`${api.definition.label} cleared.`, "info");
 }
 
@@ -166,9 +176,19 @@ async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi):
       `${api.definition.label} resume skipped: ${inProgress}.`,
       "warning",
     );
+  if (run.status === "complete")
+    return void api.ctx.ui.notify(`${api.definition.label} run is already complete.`, "warning");
+  if (run.blockedReason === "invalid_event")
+    return void api.ctx.ui.notify(
+      `${api.definition.label} cannot resume invalid replay state.`,
+      "error",
+    );
   if (run.status === "paused") {
     const resumed = resumeRun(run);
-    if (!resumed.ok) return void api.ctx.ui.notify(resumed.message, "warning");
+    if (!resumed.ok) {
+      clearRunnerTool(api.pi, api.ctx, api.definition);
+      return void api.ctx.ui.notify(resumed.message, "warning");
+    }
     const event = { type: "run.resumed" } as const;
     const entryId = appendCoreEvent(api.pi, api.ctx, {
       runnerId: api.definition.id,
@@ -176,6 +196,9 @@ async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi):
       event,
     });
     await emitRunnerEvent(api.pi, api.ctx, api.definition, event, resumed.value, entryId);
+    activateRunnerTool(api.pi, api.ctx, api.definition);
+  } else {
+    activateRunnerTool(api.pi, api.ctx, api.definition);
   }
   await api.runController();
 }
@@ -206,10 +229,35 @@ function completeArgs(definition: RunnerDefinition, prefix: string): Autocomplet
 function commandActions(definition: RunnerDefinition): RunnerCommandAction[] {
   const defaults =
     definition.command.includeDefaultActions === false ? [] : defaultCommandActions();
-  const actions = [...defaults, ...(definition.command.actions ?? [])];
   const byName = new Map<string, RunnerCommandAction>();
-  for (const action of actions) byName.set(action.name, action);
+  const aliases = new Map<string, string>();
+  for (const action of defaults) addCommandAction(byName, aliases, action, false);
+  for (const action of definition.command.actions ?? [])
+    addCommandAction(byName, aliases, action, true);
   return [...byName.values()];
+}
+
+function addCommandAction(
+  byName: Map<string, RunnerCommandAction>,
+  aliases: Map<string, string>,
+  action: RunnerCommandAction,
+  custom: boolean,
+): void {
+  const existing = byName.get(action.name);
+  const aliasOwner = aliases.get(action.name);
+  if (aliasOwner && custom) {
+    throw new Error(`Command action ${action.name} conflicts with alias for ${aliasOwner}.`);
+  }
+  if (existing && custom && !action.override) {
+    throw new Error(`Command action ${action.name} overrides a default; set override:true.`);
+  }
+  for (const alias of action.aliases ?? []) {
+    const owner = aliases.get(alias) ?? byName.get(alias)?.name;
+    if (owner && owner !== action.name)
+      throw new Error(`Command alias ${alias} conflicts with ${owner}.`);
+    aliases.set(alias, action.name);
+  }
+  byName.set(action.name, action);
 }
 
 function findAction(actions: RunnerCommandAction[], name: string): RunnerCommandAction | undefined {

@@ -1,5 +1,12 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 
+import {
+  isPlanComplete,
+  isTaskComplete,
+  isUnitWorkComplete,
+  nextReadyTask,
+  validatePlan,
+} from "./graph.ts";
 import type {
   ReadFeatureEventsOptions,
   RunnerCoreEvent,
@@ -8,8 +15,12 @@ import type {
   RunnerFeatureEventRecord,
   RunnerStoredEntry,
   RunState,
+  TaskReport,
+  UnitRollupTask,
   UnitSummary,
   WorkPlan,
+  WorkTask,
+  WorkUnit,
 } from "./types.ts";
 
 export const RUNNER_ENTRY_TYPE = "runner-core-entry";
@@ -18,14 +29,25 @@ export const RUNNER_ENTRY_TYPE = "runner-core-entry";
 // the entries in the session file; this layer only records runner-specific facts.
 export function readRun(ctx: ExtensionContext, runnerId: string): RunState | null {
   let run: RunState | null = null;
+  let pendingMalformedEntry: string | null = null;
   for (const entry of ctx.sessionManager.getBranch()) {
     const stored = parseRunnerEntry(entry);
-    if (!stored || stored.scope !== "core" || stored.runnerId !== runnerId) continue;
-    if (stored.event.type === "run.created") run = runFromCreated(stored, stored.event);
-    else if (stored.event.type === "run.cleared") {
-      if (run?.id === stored.runId) run = null;
-    } else if (run?.id === stored.runId) {
-      applyCoreEvent(run, stored, entry.id);
+    if (!stored && isMalformedRunnerEntry(entry, runnerId)) {
+      if (run) markMalformedEntry(run, entry.id);
+      else pendingMalformedEntry = entry.id;
+      continue;
+    }
+    if (stored?.scope === "core" && stored.runnerId === runnerId) {
+      if (stored.event.type === "run.created") {
+        if (run?.blockedReason === "invalid_event") continue;
+        run = runFromCreated(stored, stored.event);
+        if (pendingMalformedEntry) markMalformedEntry(run, pendingMalformedEntry);
+      } else if (stored.event.type === "run.cleared") {
+        if (run?.id === stored.runId) run = null;
+      } else if (!run) {
+        pendingMalformedEntry = entry.id;
+      } else if (run.id === stored.runId) applyCoreEvent(run, stored, entry.id);
+      continue;
     }
   }
   return run;
@@ -113,41 +135,50 @@ function runFromCreated(
 }
 
 function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: string): void {
-  run.updatedAt = entry.timestamp;
   const event = entry.event;
+  const issue = validateCoreEvent(run, event);
+  if (issue) return markInvalidEvent(run, entry, issue);
+  run.updatedAt = entry.timestamp;
+
   if (event.type === "plan.approved") {
     run.status = "active";
-    run.plan = clonePlan(event.plan);
+    run.plan = cleanPlan(event.plan);
     return;
   }
   if (event.type === "task.assigned") {
     run.currentUnitId = event.unitId;
     run.currentTaskId = event.taskId;
-    const unit = run.plan?.units.find((item) => item.id === event.unitId);
+    run.currentTaskPacketEntryId = undefined;
+    const unit = findUnit(run, event.unitId);
     if (unit && !unit.startEntryId) unit.startEntryId = entryId;
     return;
   }
+  if (event.type === "task.packet_sent") {
+    run.currentTaskPacketEntryId = entryId;
+    return;
+  }
   if (event.type === "task.reported") {
-    if (event.result === "complete") {
-      const task = run.plan?.units
-        .flatMap((unit) => unit.tasks)
-        .find((item) => item.id === event.taskId);
-      if (task) task.evidence = event.evidence;
-    } else {
+    const task = findTask(run, event.taskId);
+    appendTaskReport(task, event.result, event.evidence, entry.timestamp);
+    if (event.result === "complete" && task) task.evidence = event.evidence;
+    else if (event.result === "failed") {
       run.status = "paused";
       run.blockedReason = "task_failed";
       run.blockedDetail = event.evidence;
     }
     if (run.currentTaskId === event.taskId) run.currentTaskId = undefined;
+    run.currentTaskPacketEntryId = undefined;
     return;
   }
   if (event.type === "unit.rolled_up") {
+    applyRolledUpTaskFacts(run, event.unitId, event.tasks, entry.timestamp);
     const summary = summaryFromEntry(entry);
     run.summaries.push(summary);
-    const unit = run.plan?.units.find((item) => item.id === event.unitId);
+    const unit = findUnit(run, event.unitId);
     if (unit) unit.summaryEntryId = event.summaryEntryId ?? `rolled-up:${event.unitId}`;
     if (run.currentUnitId === event.unitId) run.currentUnitId = undefined;
     run.currentTaskId = undefined;
+    run.currentTaskPacketEntryId = undefined;
     return;
   }
   if (event.type === "run.paused") {
@@ -170,6 +201,76 @@ function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: str
   }
 }
 
+function validateCoreEvent(run: RunState, event: RunnerCoreEvent): string | null {
+  if (run.blockedReason === "invalid_event" && event.type !== "run.cleared")
+    return "run has invalid event history";
+  if (run.status === "complete" && event.type !== "run.cleared") return "completed run is terminal";
+  if (event.type === "plan.approved") {
+    if (run.status !== "setup") return "plan approval is only valid during setup";
+    const validation = validatePlan(event.plan, { enforceSafeIds: false });
+    return validation.ok ? null : validation.message;
+  }
+  if (event.type === "task.assigned") {
+    if (run.status !== "active" || !run.plan) return "task assignment needs an active plan";
+    if (run.currentTaskId) return "another task is already assigned";
+    const ready = nextReadyTask(run);
+    return ready?.unit.id === event.unitId && ready.task.id === event.taskId
+      ? null
+      : `task ${event.taskId} is not ready`;
+  }
+  if (event.type === "task.packet_sent") {
+    if (run.status !== "active" || !run.plan) return "task packet needs an active plan";
+    if (event.taskId !== run.currentTaskId || event.unitId !== run.currentUnitId)
+      return `task packet ${event.taskId} is not assigned`;
+    return null;
+  }
+  if (event.type === "task.reported") {
+    if (run.status !== "active" || !run.plan) return "task report needs an active plan";
+    if (event.taskId !== run.currentTaskId) return `task ${event.taskId} is not assigned`;
+    if (!event.evidence.trim()) return "task report needs evidence";
+    const task = findTask(run, event.taskId);
+    if (!task) return `unknown task ${event.taskId}`;
+    if (event.result === "complete" && isTaskComplete(task))
+      return `task ${event.taskId} is already complete`;
+    return null;
+  }
+  if (event.type === "unit.rolled_up") {
+    if (run.status !== "active" || !run.plan) return "unit rollup needs an active plan";
+    if (run.currentUnitId !== event.unitId) return `unit ${event.unitId} is not current`;
+    const unit = findUnit(run, event.unitId);
+    if (!unit) return `unknown unit ${event.unitId}`;
+    if (unit.summaryEntryId) return `unit ${event.unitId} is already rolled up`;
+    const taskIssue = validateRollupTasks(unit, event.tasks);
+    if (taskIssue) return taskIssue;
+    if (!event.tasks) return null;
+    const unitWithFacts = clone(unit);
+    applyRolledUpFactsToUnit(unitWithFacts, event.tasks, nowSeconds());
+    return isUnitWorkComplete(unitWithFacts) ? null : `unit ${event.unitId} is not complete`;
+  }
+  if (event.type === "run.paused")
+    return run.status === "active" || run.status === "setup" ? null : "run is not pausable";
+  if (event.type === "run.resumed")
+    return run.status === "paused" && Boolean(run.plan) ? null : "run is not resumable";
+  if (event.type === "run.completed") return isPlanComplete(run) ? null : "plan is not complete";
+  return null;
+}
+
+function markInvalidEvent(run: RunState, entry: RunnerCoreEventEntry, issue: string): void {
+  if (run.status === "complete") return;
+  run.status = "paused";
+  run.blockedReason = "invalid_event";
+  run.blockedDetail = `${entry.event.type}: ${issue}`;
+  run.updatedAt = entry.timestamp;
+}
+
+function markMalformedEntry(run: RunState, entryId: string): void {
+  if (run.status === "complete") return;
+  run.status = "paused";
+  run.blockedReason = "invalid_event";
+  run.blockedDetail = `Malformed runner entry ${entryId}.`;
+  run.updatedAt = nowSeconds();
+}
+
 function summaryFromEntry(entry: RunnerCoreEventEntry): UnitSummary {
   const event = entry.event;
   if (event.type !== "unit.rolled_up")
@@ -182,25 +283,35 @@ function summaryFromEntry(entry: RunnerCoreEventEntry): UnitSummary {
   };
 }
 
+function isMalformedRunnerEntry(entry: SessionEntry, runnerId: string): boolean {
+  if (entry.type !== "custom" || entry.customType !== RUNNER_ENTRY_TYPE) return false;
+  const data = entry.data;
+  if (!isRecord(data)) return true;
+  return typeof data.runnerId !== "string" || data.runnerId === runnerId;
+}
+
 function parseRunnerEntry(entry: SessionEntry): RunnerStoredEntry | null {
   if (entry.type !== "custom" || entry.customType !== RUNNER_ENTRY_TYPE) return null;
   const data = entry.data;
-  if (!isRecord(data) || data.version !== 1 || typeof data.runnerId !== "string") return null;
-  if (typeof data.runId !== "string") return null;
+  if (!isRecord(data) || typeof data.runnerId !== "string" || typeof data.runId !== "string")
+    return null;
   const timestamp =
     typeof data.timestamp === "number" ? data.timestamp : (timestampSeconds(entry) ?? nowSeconds());
 
-  if (data.scope === "core" && isCoreEvent(data.event)) {
+  if (data.version === 1 && data.scope === "core") {
     return {
       version: 1,
       scope: "core",
       runnerId: data.runnerId,
       runId: data.runId,
       timestamp,
-      event: clone(data.event),
+      event: isCoreEvent(data.event)
+        ? clone(data.event)
+        : { type: "run.paused", reason: "invalid_event", detail: "Malformed runner core event." },
     };
   }
   if (
+    data.version === 1 &&
     data.scope === "feature" &&
     typeof data.namespace === "string" &&
     typeof data.event === "string"
@@ -245,9 +356,8 @@ function legacyCoreEvent(kind: string, data: Record<string, unknown>): RunnerCor
       ...(isRecord(data.metadata) ? { metadata: data.metadata } : {}),
     };
   }
-  if (kind === "plan-approved" && isPlan(data.plan)) {
+  if (kind === "plan-approved" && isPlan(data.plan))
     return { type: "plan.approved", plan: clonePlan(data.plan) };
-  }
   if (
     kind === "task-assigned" &&
     typeof data.unitId === "string" &&
@@ -290,9 +400,15 @@ function legacyCoreEvent(kind: string, data: Record<string, unknown>): RunnerCor
 
 function isCoreEvent(value: unknown): value is RunnerCoreEvent {
   if (!isRecord(value) || typeof value.type !== "string") return false;
-  if (value.type === "run.created") return typeof value.intent === "string";
+  if (value.type === "run.created") {
+    return (
+      typeof value.intent === "string" && (value.metadata === undefined || isRecord(value.metadata))
+    );
+  }
   if (value.type === "plan.approved") return isPlan(value.plan);
   if (value.type === "task.assigned")
+    return typeof value.unitId === "string" && typeof value.taskId === "string";
+  if (value.type === "task.packet_sent")
     return typeof value.unitId === "string" && typeof value.taskId === "string";
   if (value.type === "task.reported") {
     return (
@@ -301,17 +417,173 @@ function isCoreEvent(value: unknown): value is RunnerCoreEvent {
       typeof value.evidence === "string"
     );
   }
-  if (value.type === "unit.rolled_up") return typeof value.unitId === "string";
-  if (value.type === "run.paused") return typeof value.reason === "string";
+  if (value.type === "unit.rolled_up") {
+    return (
+      typeof value.unitId === "string" &&
+      (value.tasks === undefined ||
+        (Array.isArray(value.tasks) && value.tasks.every(isRollupTask))) &&
+      (value.summaryEntryId === undefined || typeof value.summaryEntryId === "string") &&
+      (value.summary === undefined || typeof value.summary === "string")
+    );
+  }
+  if (value.type === "run.paused") {
+    return (
+      typeof value.reason === "string" &&
+      (value.detail === undefined || typeof value.detail === "string")
+    );
+  }
   return ["run.resumed", "run.completed", "run.cleared"].includes(value.type);
 }
 
+function validateRollupTasks(unit: WorkUnit, tasks: UnitRollupTask[] | undefined): string | null {
+  if (!tasks) return null;
+  const expected = new Set(unit.tasks.map((task) => task.id));
+  const seen = new Set<string>();
+  for (const task of tasks) {
+    if (!expected.has(task.id)) return `rollup includes unknown task ${task.id}`;
+    if (seen.has(task.id)) return `rollup includes duplicate task ${task.id}`;
+    seen.add(task.id);
+    if (!taskHasCompletionFact(task)) return `rollup task ${task.id} needs completion evidence`;
+  }
+  for (const taskId of expected) if (!seen.has(taskId)) return `rollup is missing task ${taskId}`;
+  return null;
+}
+
+function taskHasCompletionFact(task: UnitRollupTask): boolean {
+  return Boolean(
+    task.evidence?.trim() ||
+    task.reports?.some((report) => report.result === "complete" && report.evidence.trim()),
+  );
+}
+
+function isRollupTask(value: unknown): value is UnitRollupTask {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    (!("evidence" in value) || typeof value.evidence === "string") &&
+    (!("reports" in value) || (Array.isArray(value.reports) && value.reports.every(isTaskReport)))
+  );
+}
+
+function isTaskReport(value: unknown): value is TaskReport {
+  return (
+    isRecord(value) &&
+    (value.result === "complete" || value.result === "failed") &&
+    typeof value.evidence === "string" &&
+    typeof value.createdAt === "number"
+  );
+}
+
+function applyRolledUpTaskFacts(
+  run: RunState,
+  unitId: string,
+  tasks: UnitRollupTask[] | undefined,
+  timestamp: number,
+): void {
+  const unit = findUnit(run, unitId);
+  if (!unit) return;
+  applyRolledUpFactsToUnit(unit, tasks, timestamp);
+}
+
+function applyRolledUpFactsToUnit(
+  unit: WorkUnit,
+  tasks: UnitRollupTask[] | undefined,
+  timestamp: number,
+): void {
+  for (const task of tasks ?? []) {
+    const target = unit.tasks.find((item) => item.id === task.id);
+    if (!target) continue;
+    target.reports = clone(task.reports ?? target.reports ?? []);
+    if (task.evidence) target.evidence = task.evidence;
+    else if (target.reports?.some((report) => report.result === "complete")) {
+      target.evidence = [...target.reports]
+        .reverse()
+        .find((report) => report.result === "complete")?.evidence;
+    }
+    if (
+      target.evidence &&
+      !target.reports?.some(
+        (report) => report.result === "complete" && report.evidence === target.evidence,
+      )
+    ) {
+      appendTaskReport(target, "complete", target.evidence, timestamp);
+    }
+  }
+}
+
+function appendTaskReport(
+  task: WorkTask | undefined,
+  result: "complete" | "failed",
+  evidence: string,
+  timestamp: number,
+): void {
+  if (!task) return;
+  task.reports = [...(task.reports ?? []), { result, evidence, createdAt: timestamp }];
+}
+
+function findUnit(run: RunState, id: string): WorkUnit | undefined {
+  return run.plan?.units.find((unit) => unit.id === id);
+}
+
+function findTask(run: RunState, id: string): WorkTask | undefined {
+  return run.plan?.units.flatMap((unit) => unit.tasks).find((task) => task.id === id);
+}
+
 function isPlan(value: unknown): value is WorkPlan {
-  return isRecord(value) && typeof value.contract === "string" && Array.isArray(value.units);
+  return (
+    isRecord(value) &&
+    typeof value.contract === "string" &&
+    Array.isArray(value.units) &&
+    value.units.every(isUnit)
+  );
+}
+
+function isUnit(value: unknown): value is WorkUnit {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.objective === "string" &&
+    Array.isArray(value.dependsOn) &&
+    value.dependsOn.every((dep) => typeof dep === "string") &&
+    Array.isArray(value.tasks) &&
+    value.tasks.every(isTask)
+  );
+}
+
+function isTask(value: unknown): value is WorkTask {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.objective === "string" &&
+    typeof value.verification === "string" &&
+    Array.isArray(value.dependsOn) &&
+    value.dependsOn.every((dep) => typeof dep === "string")
+  );
+}
+
+function cleanPlan(plan: WorkPlan): WorkPlan {
+  return {
+    contract: plan.contract,
+    units: plan.units.map((unit) => ({
+      id: unit.id,
+      name: unit.name,
+      objective: unit.objective,
+      dependsOn: [...unit.dependsOn],
+      tasks: unit.tasks.map((task) => ({
+        id: task.id,
+        name: task.name,
+        objective: task.objective,
+        verification: task.verification,
+        dependsOn: [...task.dependsOn],
+      })),
+    })),
+  };
 }
 
 function clonePlan(plan: WorkPlan): WorkPlan {
-  return clone(plan);
+  return cleanPlan(plan);
 }
 
 function clone<T>(value: T): T {

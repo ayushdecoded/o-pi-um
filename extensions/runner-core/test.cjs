@@ -81,6 +81,7 @@ function event(kind, data = {}) {
     return {
       type: "unit.rolled_up",
       unitId: data.unitId,
+      tasks: data.tasks,
       summaryEntryId: data.summaryEntryId,
       summary: data.summary,
     };
@@ -169,11 +170,27 @@ function event(kind, data = {}) {
           entry("rollup", "unit-rolled-up", created.id, {
             unitId: "s1",
             summaryEntryId: "summary",
+            tasks: [{ id: "t1", evidence: "proof" }],
           }),
         ],
       },
     };
     assert.match(runStatusText(readRun(rolledUpBranch, "goal"), "Goal"), /Tasks: 1\/1 complete/);
+  }
+
+  {
+    const badRun = approvePlan(createRun(definition, "intent"), definition, plan()).value;
+    const ctx = {
+      sessionManager: {
+        getBranch: () => [
+          entry("created", "created", badRun.id, { intent: badRun.intent }),
+          entry("plan", "plan-approved", badRun.id, { plan: badRun.plan }),
+          entry("bad-evidence", "task-evidence", badRun.id, { taskId: "t1", evidence: "proof" }),
+        ],
+      },
+    };
+    assert.equal(readRun(ctx, "goal")?.status, "paused");
+    assert.equal(readRun(ctx, "goal")?.blockedReason, "invalid_event");
   }
 
   {
@@ -260,6 +277,47 @@ function event(kind, data = {}) {
     );
     assert.equal(readRun(ctx, "goal")?.status, "paused");
     assert.equal(readRun(ctx, "goal")?.blockedReason, "task_failed");
+  }
+
+  {
+    const entries = [];
+    const sent = [];
+    const pi = {
+      sendMessage(message) {
+        sent.push(message);
+        entries.push({
+          id: `m${entries.length}`,
+          type: "custom_message",
+          customType: message.customType,
+          details: message.details,
+          content: message.content,
+        });
+      },
+      appendEntry(customType, data) {
+        entries.push({ id: `e${entries.length}`, type: "custom", customType, data });
+        return entries.at(-1).id;
+      },
+    };
+    const ctx = {
+      hasUI: false,
+      ui: { notify() {} },
+      sessionManager: {
+        getBranch: () => entries,
+        getLeafId: () => entries.at(-1)?.id,
+        getSessionFile: () => "session.jsonl",
+        getSessionId: () => "session",
+        getLeafEntry: () => entries.at(-1),
+      },
+    };
+    const run = approvePlan(createRun(definition, "intent"), definition, plan()).value;
+    const assigned = startNextWork(run).value.run;
+    entries.push(entry("created", "created", assigned.id, { intent: assigned.intent }));
+    entries.push(entry("plan", "plan-approved", assigned.id, { plan: assigned.plan }));
+    entries.push(entry("assign", "task-assigned", assigned.id, { unitId: "s1", taskId: "t1" }));
+    assert.equal(readRun(ctx, "goal")?.currentTaskPacketEntryId, undefined);
+    await runRunnerController(pi, definition, ctx);
+    assert.equal(sent.length, 1);
+    assert.equal(readRun(ctx, "goal")?.currentTaskPacketEntryId, "e4");
   }
 
   {
@@ -371,6 +429,13 @@ function event(kind, data = {}) {
       },
       sendMessage(message) {
         sent.push(message);
+        entries.push({
+          id: `m${entries.length}`,
+          type: "custom_message",
+          customType: message.customType,
+          details: message.details,
+          content: message.content,
+        });
       },
     };
     const ctx = {

@@ -18,6 +18,7 @@ import {
   type RunnerToken,
 } from "./runtime.ts";
 import { appendCoreEvent, readRun } from "./store.ts";
+import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { hasAssignedIncompleteTask, startNextWork, unitReadyToRollUp } from "./transitions.ts";
 import type { ReadyWork, RunnerDefinition, RunState } from "./types.ts";
 
@@ -30,6 +31,13 @@ export function scheduleRunnerController(
   definition: RunnerDefinition,
   eventCtx: ExtensionContext,
 ): void {
+  const eventRun = readRun(eventCtx, definition.id);
+  if (!eventRun || eventRun.status === "complete" || eventRun.status === "paused") {
+    clearRunnerTool(pi, eventCtx, definition);
+    return;
+  }
+  activateRunnerTool(pi, eventCtx, definition);
+
   const runtime = runtimeFor(definition, eventCtx);
   const ctx = runtime.ctx;
   if (!ctx || runtime.shutdown || runtime.runningRunId || runtime.scheduled) return;
@@ -37,7 +45,12 @@ export function scheduleRunnerController(
     return void (runtime.ctx = undefined);
 
   const run = readRun(ctx, definition.id);
-  if (!run || run.status !== "active" || run.blockedReason || turnInProgressReason(ctx)) return;
+  if (!run || run.status === "complete" || run.status === "paused") {
+    clearRunnerTool(pi, ctx, definition);
+    return;
+  }
+  activateRunnerTool(pi, ctx, definition);
+  if (run.status !== "active" || run.blockedReason || turnInProgressReason(ctx)) return;
 
   const token = { key: runtimeKey(definition, ctx), generation: runtime.generation, runId: run.id };
   runtime.scheduled = true;
@@ -57,6 +70,9 @@ export async function runRunnerController(
   rememberRunnerContext(definition, ctx);
   const initial = readRun(ctx, definition.id);
   if (!initial) return void ctx.ui.notify(`No ${definition.label} run is active.`, "warning");
+
+  if (initial.status === "setup" || initial.status === "active")
+    activateRunnerTool(pi, ctx, definition);
 
   const runtime = runtimeFor(definition, ctx);
   if (runtime.runningRunId) return;
@@ -94,14 +110,14 @@ async function controllerStep(
   if (run.status === "setup") return sendSetupTurn(pi, definition, run);
 
   const workflow = definition.workflow ?? {};
-  if (hasAssignedIncompleteTask(run)) return;
+  if (hasAssignedIncompleteTask(run)) {
+    if (!run.currentTaskPacketEntryId) sendAssignedWorkTurn(pi, definition, ctx, run);
+    return;
+  }
 
   const unit = (workflow.unitReadyToRollUp ?? unitReadyToRollUp)(run);
   if (unit) {
     await rollUpReadyUnit(pi, definition, ctx, run, unit, token);
-    const afterRollup = readCurrentRun(definition, ctx, token);
-    if (afterRollup && afterRollup.status === "active")
-      await controllerStep(pi, definition, ctx, token);
     return;
   }
 
@@ -136,10 +152,21 @@ async function sendWorkTurn(
   });
   const afterAppend = readRun(ctx, definition.id) ?? run;
   await emitRunnerEvent(pi, ctx, definition, event, afterAppend, entryId);
+  sendAssignedWorkTurn(pi, definition, ctx, afterAppend);
+}
+
+function sendAssignedWorkTurn(
+  pi: ExtensionAPI,
+  definition: RunnerDefinition,
+  ctx: ExtensionCommandContext,
+  run: RunState,
+): void {
+  const work = assignedWork(run);
+  if (!work) return;
   sendTurn(
     pi,
     RUNNER_WORK_MESSAGE_TYPE,
-    definition.workPrompt({ run: afterAppend, ...work, summaries: afterAppend.summaries }),
+    definition.workPrompt({ run, ...work, summaries: run.summaries }),
     {
       runnerId: definition.id,
       runId: run.id,
@@ -148,6 +175,17 @@ async function sendWorkTurn(
       taskId: work.task.id,
     },
   );
+  appendCoreEvent(pi, ctx, {
+    runnerId: definition.id,
+    runId: run.id,
+    event: { type: "task.packet_sent", unitId: work.unit.id, taskId: work.task.id },
+  });
+}
+
+function assignedWork(run: RunState): ReadyWork | null {
+  const unit = run.plan?.units.find((item) => item.id === run.currentUnitId);
+  const task = unit?.tasks.find((item) => item.id === run.currentTaskId);
+  return unit && task ? { unit, task } : null;
 }
 
 function readCurrentRun(

@@ -9,9 +9,11 @@ Core manages:
 - compact branch-local run entries in the Pi session file
 - approved work plans as dependency graphs
 - deterministic next-ready task selection
-- task evidence validation
+- task result validation
 - pause/resume/complete transitions
 - unit rollup boundaries
+- active-runner tool scoping so Goal/RoboPi tools are not visible together
+- strict replay of durable core events
 - default command/tool/controller plumbing that runners can override piecemeal
 
 Core does not manage:
@@ -23,20 +25,7 @@ Core does not manage:
 
 ## Model behavior
 
-After setup, the model should see a focused work packet only:
-
-```text
-Implement merge precedence for config sources.
-
-Objective:
-Apply deterministic precedence: defaults < project < user < env.
-
-Done when:
-Validation confirms later sources override earlier sources.
-
-Context:
-- ConfigSource model already exists.
-```
+After setup, the model should see a focused work packet only. Work packets include the runner/tool name, run id, unit id, task id, exact result calls, and untrusted task/context data boundaries.
 
 Tool definitions teach the protocol:
 
@@ -73,6 +62,8 @@ Customization stays narrow and composable:
 - `command.actions` adds or overrides slash-command actions.
 - `tool.actions` adds model-facing actions.
 - `workflow` swaps scheduler policy decisions.
+- `validators.plan` adds feature-specific plan checks.
+- `createRunMetadata` initializes per-run metadata during default start.
 - `effects` react to durable core events and can persist namespaced feature events.
 
 RoboPi can remain a thin definition until it has real external behavior. Worktree/GitHub behavior should stay outside core.

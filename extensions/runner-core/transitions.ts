@@ -46,6 +46,8 @@ export function approvePlan(
   const cleanPlan = resetPlanProgress(plan);
   const validation = validatePlan(cleanPlan, { policy: definition.policy });
   if (!validation.ok) return validation;
+  const customIssues = runPlanValidators(definition, run, cleanPlan);
+  if (customIssues.length) return { ok: false, message: customIssues[0]!, issues: customIssues };
   return ok(
     touch({
       ...run,
@@ -159,7 +161,25 @@ function applyTaskEvidence(
     return `Task ${update.id} has incomplete dependencies.`;
 
   task.evidence = update.evidence?.trim();
-  return task.evidence ? null : `Completed task ${task.id} needs evidence.`;
+  if (!task.evidence) return `Completed task ${task.id} needs evidence.`;
+  task.reports = [
+    ...(task.reports ?? []),
+    { result: "complete", evidence: task.evidence, createdAt: nowSeconds() },
+  ];
+  return null;
+}
+
+function runPlanValidators(definition: RunnerDefinition, run: RunState, plan: WorkPlan): string[] {
+  const validators = definition.validators?.plan
+    ? Array.isArray(definition.validators.plan)
+      ? definition.validators.plan
+      : [definition.validators.plan]
+    : [];
+  return validators.flatMap((validator) => {
+    const result = validator({ plan, run, definition });
+    if (!result) return [];
+    return Array.isArray(result) ? result : [result];
+  });
 }
 
 function resetPlanProgress(plan: WorkPlan): WorkPlan {

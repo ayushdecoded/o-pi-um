@@ -18,8 +18,19 @@ export async function emitRunnerEvent(
   entryId: string,
 ): Promise<void> {
   const api = effectApi(pi, ctx, definition, run.id);
-  for (const effect of effectsFor(definition)) {
-    await effect({ ...clone(event), run: clone(run), entryId }, api);
+  for (const [index, effect] of effectsFor(definition).entries()) {
+    try {
+      await effect({ ...clone(event), run: clone(run), entryId }, api);
+    } catch (error) {
+      appendFeatureEvent(pi, ctx, {
+        runnerId: definition.id,
+        runId: run.id,
+        namespace: "runner-core",
+        event: "effect.failed",
+        payload: { coreEvent: event.type, effectIndex: index, message: errorMessage(error) },
+      });
+      ctx.ui?.notify?.(`${definition.label} effect failed: ${errorMessage(error)}`, "warning");
+    }
   }
 }
 
@@ -53,6 +64,10 @@ function effectsFor(definition: RunnerDefinition): RunnerEffect[] {
       ? definition.effects
       : [definition.effects]
     : [];
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function cloneOrNull<T>(value: T | null): T | null {

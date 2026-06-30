@@ -36,6 +36,10 @@ export type RunnerDefinition = {
   rollupPrompt?: (input: RollupPromptInput) => string;
   rollup?: false;
   policy?: RunnerPolicy;
+  validators?: RunnerValidators;
+  createRunMetadata?: (
+    input: RunnerStartInput,
+  ) => Record<string, unknown> | Promise<Record<string, unknown> | undefined> | undefined;
   workflow?: RunnerWorkflow;
   /** React to durable core events. Effects are for side effects/facts, not scheduling policy. */
   effects?: RunnerEffect | RunnerEffect[];
@@ -53,6 +57,8 @@ export type RunnerCommandConfig = {
 export type RunnerCommandAction = {
   name: string;
   aliases?: string[];
+  /** Required when intentionally replacing a default action. */
+  override?: boolean;
   description?: string;
   usage?: string;
   complete?: (input: RunnerCommandInput) => AutocompleteItem[] | null;
@@ -86,6 +92,8 @@ export type RunnerToolConfig = {
 
 export type RunnerToolAction = {
   action: string;
+  /** Required when intentionally replacing a default action. */
+  override?: boolean;
   parameters: unknown;
   guideline?: string;
   execute: (input: RunnerToolActionInput) => RunnerToolResult | Promise<RunnerToolResult>;
@@ -105,6 +113,22 @@ export type RunnerToolResult = {
   content: Array<{ type: "text"; text: string }>;
   details: Record<string, unknown>;
 };
+
+export type RunnerStartInput = {
+  intent: string;
+  ctx: ExtensionCommandContext;
+  definition: RunnerDefinition;
+};
+
+export type RunnerValidators = {
+  plan?: RunnerPlanValidator | RunnerPlanValidator[];
+};
+
+export type RunnerPlanValidator = (input: {
+  plan: WorkPlan;
+  run: RunState;
+  definition: RunnerDefinition;
+}) => string[] | string | void;
 
 export type RunnerWorkflow = {
   unitReadyToRollUp?: (run: RunState) => WorkUnit | null;
@@ -132,8 +156,15 @@ export type RunnerCoreEvent =
   | { type: "run.created"; intent: string; metadata?: Record<string, unknown> }
   | { type: "plan.approved"; plan: WorkPlan }
   | { type: "task.assigned"; unitId: string; taskId: string }
+  | { type: "task.packet_sent"; unitId: string; taskId: string }
   | { type: "task.reported"; taskId: string; result: "complete" | "failed"; evidence: string }
-  | { type: "unit.rolled_up"; unitId: string; summaryEntryId?: string; summary?: string }
+  | {
+      type: "unit.rolled_up";
+      unitId: string;
+      tasks?: UnitRollupTask[];
+      summaryEntryId?: string;
+      summary?: string;
+    }
   | { type: "run.paused"; reason: string; detail?: string }
   | { type: "run.resumed" }
   | { type: "run.completed" }
@@ -185,6 +216,7 @@ export type RunState = {
   plan?: WorkPlan;
   currentUnitId?: string;
   currentTaskId?: string;
+  currentTaskPacketEntryId?: string;
   blockedReason?: string;
   blockedDetail?: string;
   summaries: UnitSummary[];
@@ -218,8 +250,21 @@ export type WorkTask = {
   verification: string;
   /** Task dependencies are local to this unit and must point to earlier tasks. */
   dependsOn: string[];
+  reports?: TaskReport[];
   /** Evidence is the completion marker. No separate task status exists. */
   evidence?: string;
+};
+
+export type TaskReport = {
+  result: "complete" | "failed";
+  evidence: string;
+  createdAt: number;
+};
+
+export type UnitRollupTask = {
+  id: string;
+  evidence?: string;
+  reports?: TaskReport[];
 };
 
 export type UnitSummary = {
