@@ -1,4 +1,7 @@
 node_modules/
 dist/
 .tmp/
+.robopi-build/
+.robopi-runtime/
+.robopi/
 .DS_Store

@@ -57,9 +57,7 @@ export function cacheHitRateFromUsage(usage: Record<string, unknown>): number | 
 
 export function cacheHitRateFromTotals(totals: UsageTotals): number | undefined {
   const promptTokens = totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens;
-  return promptTokens > 0 && (totals.cacheReadTokens > 0 || totals.cacheWriteTokens > 0)
-    ? (totals.cacheReadTokens / promptTokens) * 100
-    : undefined;
+  return promptTokens > 0 ? (totals.cacheReadTokens / promptTokens) * 100 : undefined;
 }
 
 export function addUsageTotals(a: UsageTotals, b: UsageTotals): UsageTotals {

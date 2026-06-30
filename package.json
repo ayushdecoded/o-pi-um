@@ -36,5 +36,14 @@
     "@types/node": "^25.9.3",
     "prettier": "^3.8.4",
     "typescript": "^6.0.3"
+  },
+  "bin": {
+    "robopi": "./bin/robopi.mjs"
+  },
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "@octokit/webhooks-methods": "^6.0.0",
+    "jiti": "^2.7.0",
+    "yaml": "^2.9.0"
   }
 }

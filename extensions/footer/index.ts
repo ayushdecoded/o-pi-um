@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 import { formatCompactNumber, formatCost } from "../shared/format.ts";
-import { cacheHitRateFromTotals, sessionUsageTotals, type UsageTotals } from "../shared/usage.ts";
+import { sessionUsageTotals, type UsageTotals } from "../shared/usage.ts";
 
 export default function registerFooter(pi: ExtensionAPI): void {
   let requestFooterRender: (() => void) | undefined;
@@ -29,7 +29,7 @@ export default function registerFooter(pi: ExtensionAPI): void {
             branchLabel(branch, theme),
             isSubagent() ? chip("sub", "dim", theme) : "",
             contextLabel(ctx, theme),
-            cacheLabel(ledger, theme),
+            cacheLabel(ctx.sessionManager.getBranch(), theme),
             activeCostLabel(active, theme),
             ledgerCostLabel(active, ledger, theme),
           ]
@@ -67,12 +67,32 @@ function contextLabel(ctx: any, theme: any): string {
   return color(theme, pct > 75 ? "error" : "warning", label);
 }
 
-function cacheLabel(totals: UsageTotals, theme: any): string {
-  const cacheHit = cacheHitRateFromTotals(totals);
+function cacheLabel(entries: unknown[], theme: any): string {
+  const cacheHit = latestCacheHitRate(entries);
   if (cacheHit === undefined) return "";
   const hit = Math.round(cacheHit);
   const colorName = hit >= 98 ? "success" : hit >= 92 ? "warning" : "error";
   return `${color(theme, colorName, "↻")} ${color(theme, colorName, `${hit}%`)}`;
+}
+
+function latestCacheHitRate(entries: unknown[]): number | undefined {
+  let latest: number | undefined;
+  for (const entry of entries) {
+    const message = (entry as { type?: unknown; message?: Record<string, unknown> }).message;
+    if ((entry as { type?: unknown }).type !== "message" || message?.role !== "assistant") continue;
+    const usage = message.usage as Record<string, unknown> | undefined;
+    const input = numberField(usage, "input");
+    const cacheRead = numberField(usage, "cacheRead");
+    const cacheWrite = numberField(usage, "cacheWrite");
+    const promptTokens = input + cacheRead + cacheWrite;
+    latest = promptTokens > 0 ? (cacheRead / promptTokens) * 100 : undefined;
+  }
+  return latest;
+}
+
+function numberField(record: Record<string, unknown> | undefined, key: string): number {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function activeCostLabel(totals: UsageTotals, theme: any): string {
