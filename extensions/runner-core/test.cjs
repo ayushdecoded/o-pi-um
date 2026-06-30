@@ -6,6 +6,7 @@ const { readRun, readFeatureEvents, RUNNER_ENTRY_TYPE } = jiti("./store.ts");
 const { runStatusText } = jiti("./format.ts");
 const { registerRunnerTool } = jiti("./tool.ts");
 const { registerRunnerCommand } = jiti("./command.ts");
+const { activateRunnerTool, clearRunnerTool, rememberRunnerTool } = jiti("./tool-scope.ts");
 const { runRunnerController, turnInProgressReason } = jiti("./controller.ts");
 const { Type } = require("typebox");
 
@@ -93,6 +94,21 @@ function event(kind, data = {}) {
 }
 
 (async () => {
+  {
+    let activeTools = ["bash", "goal", "robopi"];
+    const pi = {
+      getActiveTools: () => activeTools,
+      setActiveTools: (tools) => (activeTools = tools),
+    };
+    const ctx = { ui: { notify() {} } };
+    rememberRunnerTool(definition);
+    rememberRunnerTool({ ...definition, id: "robopi", tool: { name: "robopi" } });
+    activateRunnerTool(pi, ctx, definition);
+    assert.deepEqual(activeTools, ["bash", "goal"]);
+    clearRunnerTool(pi, ctx, definition);
+    assert.deepEqual(activeTools, ["bash"]);
+  }
+
   {
     const imported = plan();
     imported.units[0].tasks[0].evidence = "should be reset";

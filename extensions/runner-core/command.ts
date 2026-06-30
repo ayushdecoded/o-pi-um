@@ -9,6 +9,7 @@ import { rememberRunnerContext, runRunnerController, turnInProgressReason } from
 import { emitRunnerEvent } from "./effects.ts";
 import { runStatusText } from "./format.ts";
 import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
+import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { createRun, pauseRun, resumeRun } from "./transitions.ts";
 import type {
   RunnerCommandAction,
@@ -118,6 +119,7 @@ async function startCommand(input: RunnerCommandInput, api: RunnerCommandApi): P
     event,
   });
   await emitRunnerEvent(api.pi, api.ctx, api.definition, event, run, entryId);
+  activateRunnerTool(api.pi, api.ctx, api.definition);
   api.ctx.ui.notify(`${api.definition.label} setup started.`, "info");
   await api.runController();
 }
@@ -140,6 +142,7 @@ async function pauseCommand(_input: RunnerCommandInput, api: RunnerCommandApi): 
     event,
   });
   await emitRunnerEvent(api.pi, api.ctx, api.definition, event, paused, entryId);
+  clearRunnerTool(api.pi, api.ctx, api.definition);
 }
 
 async function clearCommand(_input: RunnerCommandInput, api: RunnerCommandApi): Promise<void> {
@@ -152,6 +155,7 @@ async function clearCommand(_input: RunnerCommandInput, api: RunnerCommandApi): 
     event,
   });
   await emitRunnerEvent(api.pi, api.ctx, api.definition, event, run, entryId);
+  clearRunnerTool(api.pi, api.ctx, api.definition);
   api.ctx.ui.notify(`${api.definition.label} cleared.`, "info");
 }
 
@@ -166,6 +170,8 @@ async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi):
       `${api.definition.label} resume skipped: ${inProgress}.`,
       "warning",
     );
+  if (run.status === "complete")
+    return void api.ctx.ui.notify(`${api.definition.label} run is already complete.`, "warning");
   if (run.status === "paused") {
     const resumed = resumeRun(run);
     if (!resumed.ok) return void api.ctx.ui.notify(resumed.message, "warning");
@@ -177,6 +183,7 @@ async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi):
     });
     await emitRunnerEvent(api.pi, api.ctx, api.definition, event, resumed.value, entryId);
   }
+  activateRunnerTool(api.pi, api.ctx, api.definition);
   await api.runController();
 }
 
