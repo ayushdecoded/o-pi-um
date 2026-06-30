@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { emitRunnerEvent } from "./effects.ts";
 import { isCurrent, type RunnerToken } from "./runtime.ts";
 import { appendCoreEvent, readRun } from "./store.ts";
+import { clearRunnerTool } from "./tool-scope.ts";
 import { finishIfComplete, pauseRun, rollUpUnit } from "./transitions.ts";
 import type { RunnerDefinition, RunState, WorkUnit } from "./types.ts";
 
@@ -63,6 +64,7 @@ export async function completeIfReady(
     event,
   });
   await emitRunnerEvent(pi, ctx, definition, event, completed.value, entryId);
+  clearRunnerTool(pi, ctx, definition);
   ctx.ui.notify(`${definition.label} complete.`, "info");
 }
 
@@ -85,7 +87,10 @@ export async function pauseAndAppend(
     runId: paused.id,
     event,
   });
-  if (definition) await emitRunnerEvent(pi, ctx, definition, event, paused, entryId);
+  if (definition) {
+    await emitRunnerEvent(pi, ctx, definition, event, paused, entryId);
+    clearRunnerTool(pi, ctx, definition);
+  }
   ctx.ui.notify(`${reason}: ${detail}`, "warning");
 }
 

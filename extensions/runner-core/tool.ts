@@ -11,6 +11,7 @@ import {
   type TaskUpdateInput,
 } from "./plan.ts";
 import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
+import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { approvePlan, pauseRun, updateTask } from "./transitions.ts";
 import type { RunnerDefinition, RunnerToolAction, RunnerToolResult } from "./types.ts";
 
@@ -105,6 +106,7 @@ async function approvePlanFromTool({
     event,
   });
   await emitRunnerEvent(pi, ctx, definition, event, approved.value, entryId);
+  activateRunnerTool(pi, ctx, definition);
   return response(planApprovedText(approved.value));
 }
 
@@ -135,6 +137,7 @@ async function updateTaskFromTool({
       event,
     });
     await emitRunnerEvent(pi, ctx, definition, event, failed, entryId);
+    clearRunnerTool(pi, ctx, definition);
     return response(`${definition.label} paused: task ${update.id} failed. ${update.evidence}`);
   }
 

@@ -18,6 +18,7 @@ import {
   type RunnerToken,
 } from "./runtime.ts";
 import { appendCoreEvent, readRun } from "./store.ts";
+import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { hasAssignedIncompleteTask, startNextWork, unitReadyToRollUp } from "./transitions.ts";
 import type { ReadyWork, RunnerDefinition, RunState } from "./types.ts";
 
@@ -30,6 +31,13 @@ export function scheduleRunnerController(
   definition: RunnerDefinition,
   eventCtx: ExtensionContext,
 ): void {
+  const branchRun = readRun(eventCtx, definition.id);
+  if (!branchRun || branchRun.status === "complete" || branchRun.status === "paused") {
+    clearRunnerTool(pi, eventCtx, definition);
+    return;
+  }
+  activateRunnerTool(pi, eventCtx, definition);
+
   const runtime = runtimeFor(definition, eventCtx);
   const ctx = runtime.ctx;
   if (!ctx || runtime.shutdown || runtime.runningRunId || runtime.scheduled) return;
@@ -56,7 +64,13 @@ export async function runRunnerController(
 ): Promise<void> {
   rememberRunnerContext(definition, ctx);
   const initial = readRun(ctx, definition.id);
-  if (!initial) return void ctx.ui.notify(`No ${definition.label} run is active.`, "warning");
+  if (!initial) {
+    clearRunnerTool(pi, ctx, definition);
+    return void ctx.ui.notify(`No ${definition.label} run is active.`, "warning");
+  }
+  if (initial.status === "complete" || initial.status === "paused")
+    clearRunnerTool(pi, ctx, definition);
+  else activateRunnerTool(pi, ctx, definition);
 
   const runtime = runtimeFor(definition, ctx);
   if (runtime.runningRunId) return;
