@@ -1,5 +1,5 @@
 import { nextReadyTask } from "./graph.ts";
-import type { RunState, WorkPlan } from "./types.ts";
+import type { RunPlan, RunState } from "./types.ts";
 
 export function runStatusText(run: RunState | null, label: string): string {
   if (!run) return `No active ${label} run.`;
@@ -26,12 +26,12 @@ export function taskUpdateText(run: RunState): string {
     .join("\n");
 }
 
-function taskCounts(plan: WorkPlan): string {
+function taskCounts(plan: RunPlan): string {
   const total = plan.units.reduce((sum, unit) => sum + unit.tasks.length, 0);
   const done = plan.units.reduce(
     (sum, unit) =>
       sum +
-      (unit.summaryEntryId
+      (unit.runner?.summaryEntryId
         ? unit.tasks.length
         : unit.tasks.filter((task) => task.evidence?.trim()).length),
     0,

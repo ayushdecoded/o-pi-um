@@ -8,6 +8,7 @@ const { registerRunnerTool } = jiti("./tool.ts");
 const { registerRunnerCommand } = jiti("./command.ts");
 const { activateRunnerTool, clearRunnerTool, rememberRunnerTool } = jiti("./tool-scope.ts");
 const { runRunnerController, turnInProgressReason } = jiti("./controller.ts");
+const publicApi = jiti("./index.ts");
 const { Type } = require("typebox");
 
 const definition = {
@@ -58,12 +59,24 @@ function eventData(kind, runId, data = {}) {
   };
 }
 
+function packet(id, customType, runId, details = {}) {
+  return {
+    id,
+    type: "custom_message",
+    customType,
+    details: { runnerId: "goal", runId, ...details },
+    content: "",
+  };
+}
+
 function event(kind, data = {}) {
   if (kind === "created")
     return { type: "run.created", intent: data.intent ?? "intent", metadata: data.metadata };
   if (kind === "plan-approved") return { type: "plan.approved", plan: data.plan };
   if (kind === "task-assigned")
     return { type: "task.assigned", unitId: data.unitId, taskId: data.taskId };
+  if (kind === "task-packet-sent")
+    return { type: "task.packet_sent", unitId: data.unitId, taskId: data.taskId };
   if (kind === "task-evidence")
     return {
       type: "task.reported",
@@ -94,6 +107,12 @@ function event(kind, data = {}) {
 }
 
 (async () => {
+  {
+    assert.equal(typeof publicApi.registerRunner, "function");
+    assert.equal("appendCoreEvent" in publicApi, false);
+    assert.equal("approvePlan" in publicApi, false);
+  }
+
   {
     let activeTools = ["bash", "goal", "robopi"];
     const pi = {
@@ -210,6 +229,7 @@ function event(kind, data = {}) {
     };
     const run = createRun(definition, "intent");
     pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("created", run.id, { intent: run.intent }));
+    entries.push(packet("setup-packet", "runner-core-setup", run.id, { phase: "setup" }));
 
     registerRunnerTool(pi, definition);
     assert.ok(tool);
@@ -225,6 +245,23 @@ function event(kind, data = {}) {
     pi.appendEntry(
       RUNNER_ENTRY_TYPE,
       eventData("task-assigned", active.id, { unitId: "s1", taskId: "t1" }),
+    );
+    entries.push(
+      packet("stale-work", "runner-core-work", "stale", { phase: "work", taskId: "t1" }),
+    );
+    await assert.rejects(
+      () =>
+        tool.execute(
+          "call",
+          { action: "evidence", id: "t1", result: "complete", evidence: "proof" },
+          undefined,
+          undefined,
+          ctx,
+        ),
+      /Stale Goal tool call/,
+    );
+    entries.push(
+      packet("work-packet", "runner-core-work", active.id, { phase: "work", taskId: "t1" }),
     );
     await tool.execute(
       "call",
@@ -265,11 +302,19 @@ function event(kind, data = {}) {
       RUNNER_ENTRY_TYPE,
       eventData("task-assigned", assigned.id, { unitId: "s1", taskId: "t1" }),
     );
+    entries.push(
+      packet("work-packet", "runner-core-work", assigned.id, { phase: "work", taskId: "t1" }),
+    );
 
     registerRunnerTool(pi, definition);
     await tool.execute(
       "call",
-      { action: "evidence", id: "t1", result: "failed", evidence: "blocked by missing API" },
+      {
+        action: "evidence",
+        id: "t1",
+        result: "failed",
+        evidence: "blocked by missing API",
+      },
       undefined,
       undefined,
       ctx,
@@ -362,6 +407,7 @@ function event(kind, data = {}) {
         actions: [
           {
             action: "note",
+            requireRunId: false,
             parameters: Type.Object({ action: Type.String(), note: Type.String() }),
             execute({ params }) {
               return { content: [{ type: "text", text: `noted:${params.note}` }], details: {} };
@@ -411,6 +457,7 @@ function event(kind, data = {}) {
     await runRunnerController(pi, definition, ctx);
     assert.equal(sent.at(-1).customType, "runner-core-work");
     assert.equal(readRun(ctx, "goal")?.currentTaskId, "t1");
+    assert.ok(readRun(ctx, "goal")?.currentTaskPacketEntryId);
 
     const sentBeforeWaiting = sent.length;
     await runRunnerController(pi, definition, ctx);

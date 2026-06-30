@@ -5,7 +5,7 @@ import { isCurrent, type RunnerToken } from "./runtime.ts";
 import { appendCoreEvent, readRun } from "./store.ts";
 import { clearRunnerTool } from "./tool-scope.ts";
 import { finishIfComplete, pauseRun, rollUpUnit } from "./transitions.ts";
-import type { RunnerDefinition, RunState, WorkUnit } from "./types.ts";
+import type { RunnerDefinition, RunState, RunWorkUnit, WorkUnit } from "./types.ts";
 
 // Roll up exactly one completed unit. navigateTree() changes the active branch, so
 // the completed pre-navigation run remains the source of truth. We re-read only to
@@ -15,11 +15,12 @@ export async function rollUpReadyUnit(
   definition: RunnerDefinition,
   ctx: ExtensionCommandContext,
   run: RunState,
-  unit: WorkUnit,
+  unit: RunWorkUnit,
   token: RunnerToken,
 ): Promise<void> {
   if (definition.rollup === false) return appendRolledUp(pi, ctx, definition, run, unit.id);
-  if (!unit.startEntryId)
+  const startEntryId = unit.runner?.startEntryId;
+  if (!startEntryId)
     return pauseAndAppend(
       pi,
       ctx,
@@ -29,9 +30,11 @@ export async function rollUpReadyUnit(
       definition,
     );
 
-  const result = await ctx.navigateTree(unit.startEntryId, {
+  const result = await ctx.navigateTree(startEntryId, {
     summarize: true,
-    customInstructions: definition.rollupPrompt?.({ run, unit }) ?? defaultRollupPrompt(unit),
+    customInstructions:
+      definition.rollupPrompt?.({ run: publicRun(run), unit: publicUnit(unit) }) ??
+      defaultRollupPrompt(unit),
     label: `✓ ${unit.id} ${unit.name}`,
   });
   if (!isCurrent(token) || readRun(ctx, definition.id)?.id !== token.runId) return;
@@ -104,13 +107,39 @@ async function appendRolledUp(
 ): Promise<void> {
   const rolled = rollUpUnit(run, unitId, summary);
   if (!rolled.ok) return pauseAndAppend(pi, ctx, run, "rollup_failed", rolled.message, definition);
-  const event = { type: "unit.rolled_up", unitId, ...summary } as const;
+  const unit = rolled.value.plan?.units.find((item) => item.id === unitId);
+  const event = {
+    type: "unit.rolled_up",
+    unitId,
+    tasks: unit?.tasks.map((task) => ({ id: task.id, evidence: task.evidence })),
+    ...summary,
+  } as const;
   const entryId = appendCoreEvent(pi, ctx, {
     runnerId: rolled.value.runnerId,
     runId: rolled.value.id,
     event,
   });
   await emitRunnerEvent(pi, ctx, definition, event, rolled.value, entryId);
+}
+
+function publicRun(run: RunState) {
+  const {
+    plan,
+    currentTaskPacketEntryId: _packet,
+    currentTaskId: _task,
+    currentUnitId: _unit,
+    metadata: _metadata,
+    ...rest
+  } = run;
+  return {
+    ...rest,
+    ...(plan ? { plan: { contract: plan.contract, units: plan.units.map(publicUnit) } } : {}),
+  };
+}
+
+function publicUnit(unit: RunWorkUnit): WorkUnit {
+  const { runner: _runner, ...publicFields } = unit;
+  return publicFields;
 }
 
 function alreadyRolledUp(run: RunState | null, unitId: string): boolean {
@@ -128,7 +157,7 @@ function extractSummary(result: { summaryEntry?: unknown; cancelled?: boolean })
   };
 }
 
-function defaultRollupPrompt(unit: WorkUnit): string {
+function defaultRollupPrompt(unit: RunWorkUnit): string {
   return `Summarize completed work for ${unit.name}.
 Keep durable facts: changes, evidence, validation, decisions, blockers, and next context.
 Summarize only. Do not perform additional work.`;
