@@ -64,6 +64,11 @@ function normalizeTask(input: TaskInput): WorkTask {
   };
 }
 
-function cleanDeps(value: string[] | undefined): string[] {
-  return (value ?? []).map((dep) => dep.trim()).filter(Boolean);
+function cleanDeps(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .filter((dep): dep is string => typeof dep === "string")
+        .map((dep) => dep.trim())
+        .filter(Boolean)
+    : [];
 }

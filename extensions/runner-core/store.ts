@@ -144,10 +144,6 @@ function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: str
       unit.runner = { ...(unit.runner ?? {}), startEntryId: entryId };
     return;
   }
-  if (event.type === "task.packet_sent") {
-    run.currentTaskPacketEntryId = entryId;
-    return;
-  }
   if (event.type === "task.reported") {
     if (event.result === "complete") {
       const task = run.plan?.units
@@ -213,15 +209,10 @@ function validateCoreEvent(run: RunState, event: RunnerCoreEvent): string | null
       ? null
       : `task ${event.taskId} is not ready`;
   }
-  if (event.type === "task.packet_sent") {
-    if (run.status !== "active" || !run.plan) return "task packet needs an active plan";
-    if (event.taskId !== run.currentTaskId || event.unitId !== run.currentUnitId)
-      return `task packet ${event.taskId} is not assigned`;
-    return null;
-  }
   if (event.type === "task.reported") {
     if (run.status !== "active" || !run.plan) return "task report needs an active plan";
     if (event.taskId !== run.currentTaskId) return `task ${event.taskId} is not assigned`;
+    if (!run.currentTaskPacketEntryId) return `task ${event.taskId} has no delivered work packet`;
     if (!event.evidence.trim()) return "task report needs evidence";
     const task = findTask(run, event.taskId);
     if (!task) return `unknown task ${event.taskId}`;
@@ -281,7 +272,7 @@ function parseRunnerEntry(entry: SessionEntry): RunnerStoredEntry | null {
   if (!isRecord(data) || data.version !== 1 || typeof data.runnerId !== "string") return null;
   if (typeof data.runId !== "string") return null;
   const timestamp =
-    typeof data.timestamp === "number" ? data.timestamp : (timestampSeconds(entry) ?? nowSeconds());
+    typeof data.timestamp === "number" ? data.timestamp : (timestampSeconds(entry) ?? 0);
 
   if (data.scope === "core" && isCoreEvent(data.event)) {
     return {
@@ -391,8 +382,6 @@ function isCoreEvent(value: unknown): value is RunnerCoreEvent {
   if (value.type === "plan.approved") return isPlan(value.plan);
   if (value.type === "task.assigned")
     return typeof value.unitId === "string" && typeof value.taskId === "string";
-  if (value.type === "task.packet_sent")
-    return typeof value.unitId === "string" && typeof value.taskId === "string";
   if (value.type === "task.reported") {
     return (
       typeof value.taskId === "string" &&
@@ -451,7 +440,7 @@ function isPlan(value: unknown): value is WorkPlan {
       typeof unit.id === "string" &&
       typeof unit.name === "string" &&
       typeof unit.objective === "string" &&
-      (!("dependsOn" in unit) || Array.isArray(unit.dependsOn)) &&
+      (!("dependsOn" in unit) || isStringArray(unit.dependsOn)) &&
       Array.isArray(unit.tasks) &&
       unit.tasks.every(
         (task) =>
@@ -460,9 +449,13 @@ function isPlan(value: unknown): value is WorkPlan {
           typeof task.name === "string" &&
           typeof task.objective === "string" &&
           typeof task.verification === "string" &&
-          (!("dependsOn" in task) || Array.isArray(task.dependsOn)),
+          (!("dependsOn" in task) || isStringArray(task.dependsOn)),
       ),
   );
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function findUnit(run: RunState, id: string) {

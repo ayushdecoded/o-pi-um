@@ -75,8 +75,6 @@ function event(kind, data = {}) {
   if (kind === "plan-approved") return { type: "plan.approved", plan: data.plan };
   if (kind === "task-assigned")
     return { type: "task.assigned", unitId: data.unitId, taskId: data.taskId };
-  if (kind === "task-packet-sent")
-    return { type: "task.packet_sent", unitId: data.unitId, taskId: data.taskId };
   if (kind === "task-evidence")
     return {
       type: "task.reported",
@@ -111,6 +109,21 @@ function event(kind, data = {}) {
     assert.equal(typeof publicApi.registerRunner, "function");
     assert.equal("appendCoreEvent" in publicApi, false);
     assert.equal("approvePlan" in publicApi, false);
+  }
+
+  {
+    const badPlan = plan();
+    badPlan.units[0].dependsOn = [1];
+    const ctx = {
+      sessionManager: {
+        getBranch: () => [
+          entry("created", "created", "r1", { intent: "intent" }),
+          entry("plan", "plan-approved", "r1", { plan: badPlan }),
+        ],
+      },
+    };
+    assert.doesNotThrow(() => readRun(ctx, "goal"));
+    assert.equal(readRun(ctx, "goal")?.status, "setup");
   }
 
   {
@@ -175,6 +188,7 @@ function event(kind, data = {}) {
           entry("created", "created", created.id, { intent: created.intent }),
           entry("plan", "plan-approved", created.id, { plan: approved.plan }),
           entry("assign", "task-assigned", created.id, { unitId: "s1", taskId: "t1" }),
+          packet("packet", "runner-core-work", created.id, { phase: "work", taskId: "t1" }),
           entry("evidence", "task-evidence", created.id, { taskId: "t1", evidence: "proof" }),
         ],
       },
@@ -324,6 +338,22 @@ function event(kind, data = {}) {
   }
 
   {
+    const run = approvePlan(createRun(definition, "intent"), definition, plan()).value;
+    const assigned = startNextWork(run).value.run;
+    const ctx = {
+      sessionManager: {
+        getBranch: () => [
+          entry("created", "created", assigned.id, { intent: assigned.intent }),
+          entry("plan", "plan-approved", assigned.id, { plan: assigned.plan }),
+          entry("assign", "task-assigned", assigned.id, { unitId: "s1", taskId: "t1" }),
+          entry("evidence", "task-evidence", assigned.id, { taskId: "t1", evidence: "proof" }),
+        ],
+      },
+    };
+    assert.equal(readRun(ctx, "goal")?.blockedReason, "invalid_event");
+  }
+
+  {
     let command;
     const messages = [];
     const pi = {
@@ -357,6 +387,7 @@ function event(kind, data = {}) {
   {
     let command;
     const events = [];
+    const notices = [];
     const entries = [];
     const pi = {
       registerCommand(_name, config) {
@@ -370,7 +401,7 @@ function event(kind, data = {}) {
     };
     const ctx = {
       hasUI: false,
-      ui: { notify() {} },
+      ui: { notify: (message) => notices.push(message) },
       sessionManager: {
         getBranch: () => entries,
         getLeafId: () => entries.at(-1)?.id,
@@ -383,14 +414,17 @@ function event(kind, data = {}) {
       ...definition,
       effects(event, api) {
         events.push(event.type);
-        if (event.type === "run.created")
+        if (event.type === "run.created") {
           api.appendFeatureEvent("created", { intent: event.intent });
+          throw new Error("boom");
+        }
       },
     };
     registerRunnerCommand(pi, effectDefinition);
     await command.handler("start effect intent", ctx);
     assert.deepEqual(events, ["run.created"]);
     assert.equal(readFeatureEvents(ctx, "goal", { type: "created" }).length, 1);
+    assert.match(notices.join("\n"), /effect failed: boom/);
   }
 
   {
@@ -433,6 +467,13 @@ function event(kind, data = {}) {
       },
       sendMessage(message) {
         sent.push(message);
+        entries.push({
+          id: `m${entries.length}`,
+          type: "custom_message",
+          customType: message.customType,
+          details: message.details,
+          content: message.content,
+        });
       },
     };
     const ctx = {
