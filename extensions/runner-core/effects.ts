@@ -19,7 +19,11 @@ export async function emitRunnerEvent(
 ): Promise<void> {
   const api = effectApi(pi, ctx, definition, run.id);
   for (const effect of effectsFor(definition)) {
-    await effect({ ...clone(event), run: clone(run), entryId }, api);
+    try {
+      await effect({ ...clone(event), run: clone(run), entryId }, api);
+    } catch (error) {
+      api.notify(`${definition.label} effect failed: ${errorMessage(error)}`, "warning");
+    }
   }
 }
 
@@ -53,6 +57,10 @@ function effectsFor(definition: RunnerDefinition): RunnerEffect[] {
       ? definition.effects
       : [definition.effects]
     : [];
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function cloneOrNull<T>(value: T | null): T | null {

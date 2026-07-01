@@ -63,6 +63,8 @@ export type RunnerCommandAction<TEvents extends object = RunnerFeatureEventMap> 
   aliases?: string[];
   description?: string;
   usage?: string;
+  /** Required to replace a built-in command action with the same name. */
+  overrideDefault?: boolean;
   complete?: (input: RunnerCommandInput) => AutocompleteItem[] | null;
   handler: (input: RunnerCommandInput, api: RunnerCommandApi<TEvents>) => void | Promise<void>;
 };
@@ -98,7 +100,9 @@ export type RunnerToolAction<TEvents extends object = RunnerFeatureEventMap> = {
   action: string;
   parameters: unknown;
   guideline?: string;
-  /** Defaults to true: action must include runId and match the active run. */
+  /** Required to replace a built-in tool action with the same action name. */
+  overrideDefault?: boolean;
+  /** Defaults to true: action must come from the active runner packet. */
   requireRunId?: boolean;
   execute: (input: RunnerToolActionInput<TEvents>) => RunnerToolResult | Promise<RunnerToolResult>;
 };
@@ -156,7 +160,6 @@ export type RunnerCoreEvent =
   | { type: "run.created"; intent: string; metadata?: Record<string, unknown> }
   | { type: "plan.approved"; plan: WorkPlan }
   | { type: "task.assigned"; unitId: string; taskId: string }
-  | { type: "task.packet_sent"; unitId: string; taskId: string }
   | { type: "task.reported"; taskId: string; result: "complete" | "failed"; evidence: string }
   | {
       type: "unit.rolled_up";

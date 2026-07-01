@@ -76,7 +76,8 @@ async function executeRunnerTool(
         payload,
       });
     },
-    readFeatureEvents: (options = {}) => readFeatureEvents(ctx, definition.id, options),
+    readFeatureEvents: (options = {}) =>
+      readFeatureEvents(ctx, definition.id, { ...(run ? { runId: run.id } : {}), ...options }),
   });
 }
 
@@ -175,9 +176,13 @@ async function updateTaskFromTool({
 
 function toolActions(definition: RunnerDefinition): RunnerToolAction[] {
   const defaults = definition.tool.includeDefaultActions === false ? [] : defaultToolActions();
-  const actions = [...defaults, ...(definition.tool.actions ?? [])];
   const byName = new Map<string, RunnerToolAction>();
-  for (const action of actions) byName.set(action.action, action);
+  for (const action of defaults) byName.set(action.action, action);
+  for (const action of definition.tool.actions ?? []) {
+    if (byName.has(action.action) && !action.overrideDefault)
+      throw new Error(`Tool action ${action.action} must set overrideDefault:true.`);
+    byName.set(action.action, action);
+  }
   return [...byName.values()];
 }
 

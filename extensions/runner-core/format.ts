@@ -1,15 +1,18 @@
 import { nextReadyTask } from "./graph.ts";
+import { unitReadyToRollUp } from "./transitions.ts";
 import type { RunPlan, RunState } from "./types.ts";
 
 export function runStatusText(run: RunState | null, label: string): string {
   if (!run) return `No active ${label} run.`;
   const ready = nextReadyTask(run);
+  const rollupUnit = run.status === "active" ? unitReadyToRollUp(run) : null;
   return [
     `${label}: ${run.status}`,
     `Intent: ${run.intent}`,
     run.plan ? `Contract: ${short(run.plan.contract, 240)}` : undefined,
     run.blockedDetail ? `Blocked: ${run.blockedDetail}` : undefined,
     ready ? `Current: ${ready.task.id} ${ready.task.name}` : undefined,
+    rollupUnit ? `Waiting to roll up unit: ${rollupUnit.id} ${rollupUnit.name}` : undefined,
     run.plan ? taskCounts(run.plan) : undefined,
   ]
     .filter(Boolean)

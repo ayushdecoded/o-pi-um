@@ -12,6 +12,7 @@ Core manages:
 - task evidence validation
 - pause/resume/complete transitions
 - unit rollup boundaries
+- one model-visible runner tool at a time per session
 - default command/tool/controller plumbing that runners can override piecemeal
 
 Core does not manage:
@@ -70,8 +71,8 @@ Run entries are compact facts, not full snapshots. Core events are discriminated
 Customization stays narrow and composable:
 
 - `registerRunner(pi, definition, { command:false })` lets a feature own slash commands while reusing tool/controller state.
-- `command.actions` adds or overrides slash-command actions.
-- `tool.actions` adds model-facing actions.
+- `command.actions` adds slash-command actions; replacing a built-in requires `overrideDefault:true`.
+- `tool.actions` adds model-facing actions; replacing a built-in requires `overrideDefault:true`.
 - `workflow` swaps scheduler policy decisions.
 - `effects` react to durable core events and can persist namespaced feature events.
 

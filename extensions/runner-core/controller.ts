@@ -111,7 +111,7 @@ async function controllerStep(
   if (hasAssignedIncompleteTask(run)) return;
   if (run.currentTaskId && !run.currentTaskPacketEntryId) {
     const assigned = nextReadyTask(run);
-    if (assigned) return sendAssignedWorkTurn(pi, definition, ctx, run, assigned);
+    if (assigned) return sendAssignedWorkTurn(pi, definition, run, assigned);
   }
 
   const unit = (workflow.unitReadyToRollUp ?? unitReadyToRollUp)(run);
@@ -154,13 +154,12 @@ async function sendWorkTurn(
   });
   const afterAppend = readRun(ctx, definition.id) ?? run;
   await emitRunnerEvent(pi, ctx, definition, event, afterAppend, entryId);
-  sendAssignedWorkTurn(pi, definition, ctx, afterAppend, work);
+  sendAssignedWorkTurn(pi, definition, afterAppend, work);
 }
 
 function sendAssignedWorkTurn(
   pi: ExtensionAPI,
   definition: RunnerDefinition,
-  ctx: ExtensionCommandContext,
   run: RunState,
   work: ReadyWork,
 ): void {
@@ -181,13 +180,6 @@ function sendAssignedWorkTurn(
       taskId: work.task.id,
     },
   );
-  // This event is intentionally after sendTurn: if delivery crashes, replay lacks
-  // task.packet_sent and the controller can resend the already-assigned task.
-  appendCoreEvent(pi, ctx, {
-    runnerId: definition.id,
-    runId: run.id,
-    event: { type: "task.packet_sent", unitId: work.unit.id, taskId: work.task.id },
-  });
 }
 
 function publicRun(run: RunState) {

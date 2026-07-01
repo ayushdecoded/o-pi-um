@@ -213,9 +213,13 @@ function completeArgs(definition: RunnerDefinition, prefix: string): Autocomplet
 function commandActions(definition: RunnerDefinition): RunnerCommandAction[] {
   const defaults =
     definition.command.includeDefaultActions === false ? [] : defaultCommandActions();
-  const actions = [...defaults, ...(definition.command.actions ?? [])];
   const byName = new Map<string, RunnerCommandAction>();
-  for (const action of actions) byName.set(action.name, action);
+  for (const action of defaults) byName.set(action.name, action);
+  for (const action of definition.command.actions ?? []) {
+    if (byName.has(action.name) && !action.overrideDefault)
+      throw new Error(`Command action ${action.name} must set overrideDefault:true.`);
+    byName.set(action.name, action);
+  }
   return [...byName.values()];
 }
 
@@ -244,7 +248,13 @@ function commandApi(
         payload,
       });
     },
-    readFeatureEvents: (options = {}) => readFeatureEvents(ctx, definition.id, options),
+    readFeatureEvents: (options = {}) => {
+      const run = readRun(ctx, definition.id);
+      return readFeatureEvents(ctx, definition.id, {
+        ...(run ? { runId: run.id } : {}),
+        ...options,
+      });
+    },
     runController: () => runRunnerController(pi, definition, ctx),
   };
 }
