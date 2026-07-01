@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -107,14 +109,20 @@ async function controllerStep(
   if (run.status === "paused" || run.blockedReason) return notifyPaused(ctx, definition, run);
   if (run.status === "setup") return sendSetupTurn(pi, definition, run);
 
-  const workflow = definition.workflow ?? {};
-  if (hasAssignedIncompleteTask(run)) return;
-  if (run.currentTaskId && !run.currentTaskPacketEntryId) {
+  if (run.currentTaskId) {
     const assigned = nextReadyTask(run);
-    if (assigned) return sendAssignedWorkTurn(pi, definition, run, assigned);
+    if (assigned && !hasVisibleWorkPacket(ctx, definition, run))
+      return sendAssignedWorkTurn(
+        pi,
+        definition,
+        run,
+        assigned,
+        run.currentTaskPacketId ?? randomUUID(),
+      );
   }
+  if (hasAssignedIncompleteTask(run)) return;
 
-  const unit = (workflow.unitReadyToRollUp ?? unitReadyToRollUp)(run);
+  const unit = unitReadyToRollUp(run);
   if (unit) {
     await rollUpReadyUnit(pi, definition, ctx, run, unit, token);
     const afterRollup = readCurrentRun(definition, ctx, token);
@@ -123,10 +131,9 @@ async function controllerStep(
     return;
   }
 
-  if ((workflow.isPlanComplete ?? isPlanComplete)(run))
-    return completeIfReady(pi, definition, ctx, run);
+  if (isPlanComplete(run)) return completeIfReady(pi, definition, ctx, run);
 
-  const started = (workflow.startNextWork ?? startNextWork)(run);
+  const started = startNextWork(run);
   if (!started.ok) return pauseAndAppend(pi, ctx, run, "blocked", started.message, definition);
   await sendWorkTurn(pi, definition, ctx, started.value.run, started.value.work);
 }
@@ -146,7 +153,13 @@ async function sendWorkTurn(
   run: RunState,
   work: ReadyWork,
 ): Promise<void> {
-  const event = { type: "task.assigned", unitId: work.unit.id, taskId: work.task.id } as const;
+  const packetId = randomUUID();
+  const event = {
+    type: "task.assigned",
+    unitId: work.unit.id,
+    taskId: work.task.id,
+    packetId,
+  } as const;
   const entryId = appendCoreEvent(pi, ctx, {
     runnerId: definition.id,
     runId: run.id,
@@ -154,7 +167,7 @@ async function sendWorkTurn(
   });
   const afterAppend = readRun(ctx, definition.id) ?? run;
   await emitRunnerEvent(pi, ctx, definition, event, afterAppend, entryId);
-  sendAssignedWorkTurn(pi, definition, afterAppend, work);
+  sendAssignedWorkTurn(pi, definition, afterAppend, work, packetId);
 }
 
 function sendAssignedWorkTurn(
@@ -162,6 +175,7 @@ function sendAssignedWorkTurn(
   definition: RunnerDefinition,
   run: RunState,
   work: ReadyWork,
+  packetId: string,
 ): void {
   sendTurn(
     pi,
@@ -178,14 +192,38 @@ function sendAssignedWorkTurn(
       phase: "work",
       unitId: work.unit.id,
       taskId: work.task.id,
+      packetId,
     },
   );
+}
+
+function hasVisibleWorkPacket(
+  ctx: ExtensionCommandContext,
+  definition: RunnerDefinition,
+  run: RunState,
+): boolean {
+  if (!run.currentTaskPacketId) return false;
+  return ctx.sessionManager.getBranch().some((entry) => {
+    const packet = entry as {
+      type?: unknown;
+      customType?: unknown;
+      details?: Record<string, unknown>;
+    };
+    return (
+      packet.type === "custom_message" &&
+      packet.customType === RUNNER_WORK_MESSAGE_TYPE &&
+      packet.details?.runnerId === definition.id &&
+      packet.details.runId === run.id &&
+      packet.details.taskId === run.currentTaskId &&
+      packet.details.packetId === run.currentTaskPacketId
+    );
+  });
 }
 
 function publicRun(run: RunState) {
   const {
     plan,
-    currentTaskPacketEntryId: _packet,
+    currentTaskPacketId: _packet,
     currentTaskId: _task,
     currentUnitId: _unit,
     metadata: _metadata,

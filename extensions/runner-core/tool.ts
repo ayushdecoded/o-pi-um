@@ -14,7 +14,7 @@ import {
 import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
 import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { approvePlan, pauseRun, updateTask } from "./transitions.ts";
-import type { RunnerDefinition, RunnerToolAction, RunnerToolResult } from "./types.ts";
+import type { RunnerDefinition, RunnerToolAction, RunnerToolResult, RunState } from "./types.ts";
 
 export type RunnerToolParams =
   | { action: "approve"; contract: string; plan: PlanInput }
@@ -77,7 +77,10 @@ async function executeRunnerTool(
       });
     },
     readFeatureEvents: (options = {}) =>
-      readFeatureEvents(ctx, definition.id, { ...(run ? { runId: run.id } : {}), ...options }),
+      readFeatureEvents(ctx, definition.id, {
+        ...(run ? { runId: run.id } : {}),
+        ...options,
+      }) as never,
   });
 }
 
@@ -208,7 +211,7 @@ function schemaForAction(action: RunnerToolAction): TSchema {
   return schema;
 }
 
-type RunnerPacket = { phase?: string; runId?: string; taskId?: string };
+type RunnerPacket = { phase?: string; runId?: string; taskId?: string; packetId?: string };
 
 function currentRunnerPacket(
   ctx: ExtensionContext,
@@ -233,6 +236,12 @@ function currentRunnerPacket(
       phase: typeof details.phase === "string" ? details.phase : undefined,
       runId: typeof details.runId === "string" ? details.runId : undefined,
       taskId: typeof details.taskId === "string" ? details.taskId : undefined,
+      packetId:
+        typeof details.packetId === "string"
+          ? details.packetId
+          : typeof details.taskId === "string"
+            ? `legacy:${details.taskId}`
+            : undefined,
     };
   }
   return null;
@@ -240,7 +249,7 @@ function currentRunnerPacket(
 
 function assertPacketMatchesRun(
   packet: RunnerPacket | null,
-  run: { id: string },
+  run: Pick<RunState, "id" | "currentTaskPacketId">,
   definition: RunnerDefinition,
   phase?: "setup" | "work",
 ): void {
@@ -248,6 +257,14 @@ function assertPacketMatchesRun(
   if (packet.runId !== run.id) fail(`Stale ${definition.label} tool call for run ${packet.runId}.`);
   if (phase && packet.phase !== phase)
     fail(`${definition.label} ${phase} action came from a ${packet.phase ?? "unknown"} packet.`);
+  if (
+    "currentTaskPacketId" in run &&
+    run.currentTaskPacketId &&
+    packet.packetId !== run.currentTaskPacketId
+  )
+    fail(
+      `Stale ${definition.label} tool call for packet ${String(packet.packetId ?? "<missing>")}.`,
+    );
 }
 
 function assertPacketTaskMatches(

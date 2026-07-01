@@ -125,7 +125,7 @@ async function appendRolledUp(
 function publicRun(run: RunState) {
   const {
     plan,
-    currentTaskPacketEntryId: _packet,
+    currentTaskPacketId: _packet,
     currentTaskId: _task,
     currentUnitId: _unit,
     metadata: _metadata,

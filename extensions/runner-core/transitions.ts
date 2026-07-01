@@ -80,7 +80,7 @@ export function updateTask(
   const plan = clone(run.plan);
   const issue = applyTaskEvidence(plan, run, update);
   if (issue) return fail(issue);
-  return ok(touch({ ...run, plan, currentTaskId: undefined, currentTaskPacketEntryId: undefined }));
+  return ok(touch({ ...run, plan, currentTaskId: undefined, currentTaskPacketId: undefined }));
 }
 
 export function rollUpUnit(
@@ -108,7 +108,7 @@ export function rollUpUnit(
       plan,
       currentUnitId: undefined,
       currentTaskId: undefined,
-      currentTaskPacketEntryId: undefined,
+      currentTaskPacketId: undefined,
       summaries,
     }),
   );
@@ -151,7 +151,7 @@ export function unitReadyToRollUp(run: RunState): RunWorkUnit | null {
 export function hasAssignedIncompleteTask(run: RunState): boolean {
   if (!run.currentTaskId || !run.plan) return false;
   const task = findTask(run.plan, run.currentTaskId);
-  return Boolean(task && !isTaskComplete(task) && run.currentTaskPacketEntryId);
+  return Boolean(task && !isTaskComplete(task) && run.currentTaskPacketId);
 }
 
 function applyTaskEvidence(

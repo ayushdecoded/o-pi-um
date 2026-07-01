@@ -64,7 +64,12 @@ function packet(id, customType, runId, details = {}) {
     id,
     type: "custom_message",
     customType,
-    details: { runnerId: "goal", runId, ...details },
+    details: {
+      runnerId: "goal",
+      runId,
+      ...(details.taskId && !details.packetId ? { packetId: `legacy:${details.taskId}` } : {}),
+      ...details,
+    },
     content: "",
   };
 }
@@ -93,6 +98,7 @@ function event(kind, data = {}) {
     return {
       type: "unit.rolled_up",
       unitId: data.unitId,
+      tasks: data.tasks,
       summaryEntryId: data.summaryEntryId,
       summary: data.summary,
     };
@@ -218,6 +224,7 @@ function event(kind, data = {}) {
           entry("rollup", "unit-rolled-up", created.id, {
             unitId: "s1",
             summaryEntryId: "summary",
+            tasks: [{ id: "t1", evidence: "proof" }],
           }),
         ],
       },
@@ -335,22 +342,6 @@ function event(kind, data = {}) {
     );
     assert.equal(readRun(ctx, "goal")?.status, "paused");
     assert.equal(readRun(ctx, "goal")?.blockedReason, "task_failed");
-  }
-
-  {
-    const run = approvePlan(createRun(definition, "intent"), definition, plan()).value;
-    const assigned = startNextWork(run).value.run;
-    const ctx = {
-      sessionManager: {
-        getBranch: () => [
-          entry("created", "created", assigned.id, { intent: assigned.intent }),
-          entry("plan", "plan-approved", assigned.id, { plan: assigned.plan }),
-          entry("assign", "task-assigned", assigned.id, { unitId: "s1", taskId: "t1" }),
-          entry("evidence", "task-evidence", assigned.id, { taskId: "t1", evidence: "proof" }),
-        ],
-      },
-    };
-    assert.equal(readRun(ctx, "goal")?.blockedReason, "invalid_event");
   }
 
   {
@@ -498,7 +489,7 @@ function event(kind, data = {}) {
     await runRunnerController(pi, definition, ctx);
     assert.equal(sent.at(-1).customType, "runner-core-work");
     assert.equal(readRun(ctx, "goal")?.currentTaskId, "t1");
-    assert.ok(readRun(ctx, "goal")?.currentTaskPacketEntryId);
+    assert.ok(readRun(ctx, "goal")?.currentTaskPacketId);
 
     const sentBeforeWaiting = sent.length;
     await runRunnerController(pi, definition, ctx);

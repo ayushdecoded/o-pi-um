@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 
-import { RUNNER_WORK_MESSAGE_TYPE } from "./constants.ts";
 import { normalizePlan } from "./plan.ts";
 import {
   isPlanComplete,
@@ -30,17 +29,13 @@ export function readRun(ctx: ExtensionContext, runnerId: string): RunState | nul
   let run: RunState | null = null;
   for (const entry of ctx.sessionManager.getBranch()) {
     const stored = parseRunnerEntry(entry);
-    if (!stored || stored.scope !== "core" || stored.runnerId !== runnerId) {
-      if (run) applyLegacyWorkPacketEntry(run, entry);
-      continue;
-    }
+    if (!stored || stored.scope !== "core" || stored.runnerId !== runnerId) continue;
     if (stored.event.type === "run.created") run = runFromCreated(stored, stored.event);
     else if (stored.event.type === "run.cleared") {
       if (run?.id === stored.runId) run = null;
     } else if (run?.id === stored.runId) {
       applyCoreEvent(run, stored, entry.id);
     }
-    if (run) applyLegacyWorkPacketEntry(run, entry);
   }
   return run;
 }
@@ -139,6 +134,7 @@ function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: str
   if (event.type === "task.assigned") {
     run.currentUnitId = event.unitId;
     run.currentTaskId = event.taskId;
+    run.currentTaskPacketId = event.packetId;
     const unit = run.plan?.units.find((item) => item.id === event.unitId);
     if (unit && !unit.runner?.startEntryId)
       unit.runner = { ...(unit.runner ?? {}), startEntryId: entryId };
@@ -156,7 +152,7 @@ function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: str
       run.blockedDetail = event.evidence;
     }
     if (run.currentTaskId === event.taskId) run.currentTaskId = undefined;
-    run.currentTaskPacketEntryId = undefined;
+    run.currentTaskPacketId = undefined;
     return;
   }
   if (event.type === "unit.rolled_up") {
@@ -171,7 +167,7 @@ function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: str
       };
     if (run.currentUnitId === event.unitId) run.currentUnitId = undefined;
     run.currentTaskId = undefined;
-    run.currentTaskPacketEntryId = undefined;
+    run.currentTaskPacketId = undefined;
     return;
   }
   if (event.type === "run.paused") {
@@ -212,7 +208,7 @@ function validateCoreEvent(run: RunState, event: RunnerCoreEvent): string | null
   if (event.type === "task.reported") {
     if (run.status !== "active" || !run.plan) return "task report needs an active plan";
     if (event.taskId !== run.currentTaskId) return `task ${event.taskId} is not assigned`;
-    if (!run.currentTaskPacketEntryId) return `task ${event.taskId} has no delivered work packet`;
+
     if (!event.evidence.trim()) return "task report needs evidence";
     const task = findTask(run, event.taskId);
     if (!task) return `unknown task ${event.taskId}`;
@@ -245,13 +241,6 @@ function pauseForInvalidEvent(run: RunState, entry: RunnerCoreEventEntry, issue:
   run.blockedReason = "invalid_event";
   run.blockedDetail = `${entry.event.type}: ${issue}`;
   run.updatedAt = entry.timestamp;
-}
-
-function applyLegacyWorkPacketEntry(run: RunState, entry: SessionEntry): void {
-  if (entry.type !== "custom_message" || entry.customType !== RUNNER_WORK_MESSAGE_TYPE) return;
-  const details = (entry as { details?: Record<string, unknown> }).details;
-  if (details?.runnerId !== run.runnerId || details.runId !== run.id) return;
-  if (details.taskId === run.currentTaskId) run.currentTaskPacketEntryId = entry.id;
 }
 
 function summaryFromEntry(entry: RunnerCoreEventEntry): UnitSummary {
@@ -304,7 +293,10 @@ function parseRunnerEntry(entry: SessionEntry): RunnerStoredEntry | null {
 }
 
 function normalizeCoreEvent(event: RunnerCoreEvent): RunnerCoreEvent {
-  return event.type === "plan.approved" ? { ...event, plan: clonePlan(event.plan) } : clone(event);
+  if (event.type === "plan.approved") return { ...event, plan: clonePlan(event.plan) };
+  if (event.type === "task.assigned")
+    return { ...event, packetId: event.packetId ?? `legacy:${event.taskId}` };
+  return clone(event);
 }
 
 function parseLegacyCoreEntry(
@@ -341,7 +333,12 @@ function legacyCoreEvent(kind: string, data: Record<string, unknown>): RunnerCor
     typeof data.unitId === "string" &&
     typeof data.taskId === "string"
   ) {
-    return { type: "task.assigned", unitId: data.unitId, taskId: data.taskId };
+    return {
+      type: "task.assigned",
+      unitId: data.unitId,
+      taskId: data.taskId,
+      packetId: typeof data.packetId === "string" ? data.packetId : `legacy:${data.taskId}`,
+    };
   }
   if (
     kind === "task-evidence" &&
@@ -381,7 +378,11 @@ function isCoreEvent(value: unknown): value is RunnerCoreEvent {
   if (value.type === "run.created") return typeof value.intent === "string";
   if (value.type === "plan.approved") return isPlan(value.plan);
   if (value.type === "task.assigned")
-    return typeof value.unitId === "string" && typeof value.taskId === "string";
+    return (
+      typeof value.unitId === "string" &&
+      typeof value.taskId === "string" &&
+      (value.packetId === undefined || typeof value.packetId === "string")
+    );
   if (value.type === "task.reported") {
     return (
       typeof value.taskId === "string" &&

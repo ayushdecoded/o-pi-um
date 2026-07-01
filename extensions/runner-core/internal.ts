@@ -69,7 +69,6 @@ export type {
   RunnerToolActionInput,
   RunnerToolConfig,
   RunnerToolResult,
-  RunnerWorkflow,
   RunPlan,
   RunState,
   RunStatus,
