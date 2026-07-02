@@ -55,11 +55,7 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
     async execute(_id, params: SubagentParamsType, signal, onUpdate, ctx) {
       const options = params.options ?? {};
       const tasks = params.tasks?.map((task) => task.trim()).filter(Boolean) ?? [];
-      const sessionFiles =
-        params.sessionFiles
-          ?.map((file) => file.trim())
-          .filter(Boolean)
-          .map(canonicalSessionFile) ?? [];
+      const sessionFiles = followupSessionFiles(params);
       if (tasks.length === 0) throw new Error("Provide `tasks` with at least one instruction.");
       if (sessionFiles.length > 0) {
         if (tasks.length !== 1 && tasks.length !== sessionFiles.length)
@@ -141,7 +137,8 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
     },
     renderCall(args, theme) {
       const taskCount = args.tasks?.length ?? 0;
-      const followupCount = args.sessionFiles?.length ?? 0;
+      const legacySessionFile = (args as { sessionFile?: string }).sessionFile;
+      const followupCount = args.sessionFiles?.length ?? (legacySessionFile ? 1 : 0);
       const action =
         followupCount > 1
           ? `${followupCount} parallel follow-ups`
@@ -161,6 +158,14 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
       return new Text(renderRunsForUser(result.details?.runs, fallback, theme), 0, 0);
     },
   };
+}
+
+function followupSessionFiles(params: SubagentParamsType): string[] {
+  const plural = params.sessionFiles?.map((file) => file.trim()).filter(Boolean) ?? [];
+  const singular = params.sessionFile?.trim();
+  if (singular && plural.length > 0)
+    throw new Error("Use either sessionFiles or legacy sessionFile, not both.");
+  return (singular ? [singular] : plural).map(canonicalSessionFile);
 }
 
 function canonicalSessionFile(file: string): string {
