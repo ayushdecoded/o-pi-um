@@ -141,10 +141,20 @@ function applyCoreEvent(run: RunState, entry: RunnerCoreEventEntry, entryId: str
     return;
   }
   if (event.type === "task.reported") {
+    const task = run.plan?.units
+      .flatMap((unit) => unit.tasks)
+      .find((item) => item.id === event.taskId);
+    if (task)
+      task.reports = [
+        ...(task.reports ?? []),
+        {
+          attemptId: event.attemptId,
+          result: event.result,
+          evidence: event.evidence,
+          createdAt: entry.timestamp,
+        },
+      ];
     if (event.result === "complete") {
-      const task = run.plan?.units
-        .flatMap((unit) => unit.tasks)
-        .find((item) => item.id === event.taskId);
       if (task) task.evidence = event.evidence;
     } else {
       run.status = "paused";
@@ -208,7 +218,7 @@ function validateCoreEvent(run: RunState, event: RunnerCoreEvent): string | null
   if (event.type === "task.reported") {
     if (run.status !== "active" || !run.plan) return "task report needs an active plan";
     if (event.taskId !== run.currentTaskId) return `task ${event.taskId} is not assigned`;
-
+    if (!event.attemptId.trim()) return "task report needs an attempt id";
     if (!event.evidence.trim()) return "task report needs evidence";
     const task = findTask(run, event.taskId);
     if (!task) return `unknown task ${event.taskId}`;
@@ -296,6 +306,8 @@ function normalizeCoreEvent(event: RunnerCoreEvent): RunnerCoreEvent {
   if (event.type === "plan.approved") return { ...event, plan: clonePlan(event.plan) };
   if (event.type === "task.assigned")
     return { ...event, packetId: event.packetId ?? `legacy:${event.taskId}` };
+  if (event.type === "task.reported")
+    return { ...event, attemptId: event.attemptId ?? `legacy:${event.taskId}` };
   return clone(event);
 }
 
@@ -350,6 +362,7 @@ function legacyCoreEvent(kind: string, data: Record<string, unknown>): RunnerCor
       taskId: data.taskId,
       result: "complete",
       evidence: data.evidence,
+      attemptId: typeof data.attemptId === "string" ? data.attemptId : `legacy:${data.taskId}`,
     };
   }
   if (kind === "unit-rolled-up" && typeof data.unitId === "string") {
@@ -387,7 +400,8 @@ function isCoreEvent(value: unknown): value is RunnerCoreEvent {
     return (
       typeof value.taskId === "string" &&
       (value.result === "complete" || value.result === "failed") &&
-      typeof value.evidence === "string"
+      typeof value.evidence === "string" &&
+      (value.attemptId === undefined || typeof value.attemptId === "string")
     );
   }
   if (value.type === "unit.rolled_up") {
@@ -408,7 +422,10 @@ function applyRolledUpTaskFacts(run: RunState, unitId: string, tasks: UnitRollup
   if (!unit) return;
   for (const fact of tasks) {
     const task = unit.tasks.find((item) => item.id === fact.id);
-    if (task && fact.evidence?.trim()) task.evidence = fact.evidence;
+    if (task && fact.evidence?.trim()) {
+      task.evidence = fact.evidence;
+      task.reports = fact.reports;
+    }
   }
 }
 
@@ -429,7 +446,12 @@ function validateRollupTasks(
 }
 
 function isRollupTask(value: unknown): value is UnitRollupTask {
-  return isRecord(value) && typeof value.id === "string" && typeof value.evidence === "string";
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.evidence === "string" &&
+    (value.reports === undefined || Array.isArray(value.reports))
+  );
 }
 
 function isPlan(value: unknown): value is WorkPlan {

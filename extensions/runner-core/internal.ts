@@ -3,6 +3,7 @@
 export { registerRunnerCommand } from "./command.ts";
 export { scheduleRunnerController, runRunnerController } from "./controller.ts";
 export { registerRunnerTool } from "./tool.ts";
+export { activeRunnerOwner, rememberRunnerDefinition } from "./ownership.ts";
 export {
   RUNNER_ENTRY_TYPE,
   appendCoreEvent,
@@ -35,6 +36,7 @@ export {
   approvePlan,
   createRun,
   currentUnit,
+  failTask,
   finishIfComplete,
   hasAssignedIncompleteTask,
   pauseRun,
@@ -64,6 +66,7 @@ export type {
   RunnerFeatureEventRecord,
   RunnerPolicy,
   RunnerPromptRun,
+  RunnerRunView,
   RunnerStoredEntry,
   RunnerToolAction,
   RunnerToolActionInput,
@@ -74,6 +77,7 @@ export type {
   RunStatus,
   RunWorkUnit,
   SetupPromptInput,
+  TaskReport,
   UnitSummary,
   WorkPlan,
   WorkPromptInput,

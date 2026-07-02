@@ -14,6 +14,8 @@ export type RunnerRuntime = {
   scheduled: boolean;
   /** Marks this runtime unusable after session shutdown. */
   shutdown: boolean;
+  /** Avoids repeating reload recovery notifications for the same run. */
+  resumeNoticeRunId?: string;
 };
 
 export type RunnerToken = {

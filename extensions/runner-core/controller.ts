@@ -10,6 +10,7 @@ import { RUNNER_SETUP_MESSAGE_TYPE, RUNNER_WORK_MESSAGE_TYPE } from "./constants
 import { emitRunnerEvent } from "./effects.ts";
 import { isPlanComplete, nextReadyTask } from "./graph.ts";
 import { sendTurn } from "./messages.ts";
+import { activeRunnerOwner } from "./ownership.ts";
 import { completeIfReady, pauseAndAppend, rollUpReadyUnit } from "./rollup.ts";
 import {
   isCurrent,
@@ -22,7 +23,8 @@ import {
 import { appendCoreEvent, readRun } from "./store.ts";
 import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { hasAssignedIncompleteTask, startNextWork, unitReadyToRollUp } from "./transitions.ts";
-import type { ReadyWork, RunnerDefinition, RunState, WorkUnit } from "./types.ts";
+import type { ReadyWork, RunnerDefinition, RunState } from "./types.ts";
+import { toPublicUnit, toRunView } from "./view.ts";
 
 export { rememberRunnerContext, resetRunnerContext, turnInProgressReason } from "./runtime.ts";
 
@@ -33,6 +35,12 @@ export function scheduleRunnerController(
   definition: RunnerDefinition,
   eventCtx: ExtensionContext,
 ): void {
+  const owner = activeRunnerOwner(eventCtx, definition.id);
+  if (owner) {
+    clearRunnerTool(pi, eventCtx, definition);
+    return;
+  }
+
   const branchRun = readRun(eventCtx, definition.id);
   if (!branchRun || branchRun.status === "complete" || branchRun.status === "paused") {
     clearRunnerTool(pi, eventCtx, definition);
@@ -42,7 +50,17 @@ export function scheduleRunnerController(
 
   const runtime = runtimeFor(definition, eventCtx);
   const ctx = runtime.ctx;
-  if (!ctx || runtime.shutdown || runtime.runningRunId || runtime.scheduled) return;
+  if (!ctx) {
+    if (runtime.resumeNoticeRunId !== branchRun.id) {
+      runtime.resumeNoticeRunId = branchRun.id;
+      eventCtx.ui.notify(
+        `${definition.label} is active after reload; run /${definition.command.name} resume to reconnect the controller.`,
+        "warning",
+      );
+    }
+    return;
+  }
+  if (runtime.shutdown || runtime.runningRunId || runtime.scheduled) return;
   if (runtimeKey(definition, ctx) !== runtimeKey(definition, eventCtx))
     return void (runtime.ctx = undefined);
 
@@ -139,7 +157,7 @@ async function controllerStep(
 }
 
 function sendSetupTurn(pi: ExtensionAPI, definition: RunnerDefinition, run: RunState): void {
-  sendTurn(pi, RUNNER_SETUP_MESSAGE_TYPE, definition.setupPrompt({ run: publicRun(run) }), {
+  sendTurn(pi, RUNNER_SETUP_MESSAGE_TYPE, definition.setupPrompt({ run: toRunView(run)! }), {
     runnerId: definition.id,
     runId: run.id,
     phase: "setup",
@@ -181,8 +199,8 @@ function sendAssignedWorkTurn(
     pi,
     RUNNER_WORK_MESSAGE_TYPE,
     definition.workPrompt({
-      run: publicRun(run),
-      unit: publicUnit(work.unit),
+      run: toRunView(run)!,
+      unit: toPublicUnit(work.unit),
       task: work.task,
       summaries: run.summaries,
     }),
@@ -218,33 +236,6 @@ function hasVisibleWorkPacket(
       packet.details.packetId === run.currentTaskPacketId
     );
   });
-}
-
-function publicRun(run: RunState) {
-  const {
-    plan,
-    currentTaskPacketId: _packet,
-    currentTaskId: _task,
-    currentUnitId: _unit,
-    metadata: _metadata,
-    ...rest
-  } = run;
-  return {
-    ...rest,
-    ...(plan
-      ? {
-          plan: {
-            contract: plan.contract,
-            units: plan.units.map(publicUnit),
-          },
-        }
-      : {}),
-  };
-}
-
-function publicUnit(unit: ReadyWork["unit"]): WorkUnit {
-  const { runner: _runner, ...publicFields } = unit;
-  return publicFields;
 }
 
 function readCurrentRun(

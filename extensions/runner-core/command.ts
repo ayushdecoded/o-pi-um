@@ -8,9 +8,11 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { rememberRunnerContext, runRunnerController, turnInProgressReason } from "./controller.ts";
 import { emitRunnerEvent } from "./effects.ts";
 import { runStatusText } from "./format.ts";
+import { activeRunnerOwner } from "./ownership.ts";
 import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
 import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { createRun, pauseRun, resumeRun } from "./transitions.ts";
+import { toRunView } from "./view.ts";
 import type {
   RunnerCommandAction,
   RunnerCommandApi,
@@ -96,6 +98,15 @@ async function startCommand(input: RunnerCommandInput, api: RunnerCommandApi): P
       "warning",
     );
 
+  const owner = activeRunnerOwner(api.ctx, api.definition.id);
+  if (owner) {
+    api.ctx.ui.notify(
+      `${owner.definition.label} already owns this session. Clear or complete it before starting ${api.definition.label}.`,
+      "warning",
+    );
+    return;
+  }
+
   const existing = api.readRun();
   if (existing && existing.status !== "complete") {
     const ok =
@@ -170,6 +181,14 @@ async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi):
       `${api.definition.label} resume skipped: ${inProgress}.`,
       "warning",
     );
+  const owner = activeRunnerOwner(api.ctx, api.definition.id);
+  if (owner) {
+    api.ctx.ui.notify(
+      `${owner.definition.label} owns this session. Clear or complete it before resuming ${api.definition.label}.`,
+      "warning",
+    );
+    return;
+  }
   if (run.status === "complete")
     return void api.ctx.ui.notify(`${api.definition.label} run is already complete.`, "warning");
   if (run.status === "paused") {
@@ -236,7 +255,7 @@ function commandApi(
     pi,
     ctx,
     definition,
-    readRun: () => readRun(ctx, definition.id),
+    readRun: () => toRunView(readRun(ctx, definition.id)),
     appendFeatureEvent: (type, payload, namespace = definition.id) => {
       const run = readRun(ctx, definition.id);
       if (!run) throw new Error(`No ${definition.label} run is active.`);

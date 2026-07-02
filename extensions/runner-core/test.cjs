@@ -7,6 +7,7 @@ const { runStatusText } = jiti("./format.ts");
 const { registerRunnerTool } = jiti("./tool.ts");
 const { registerRunnerCommand } = jiti("./command.ts");
 const { activateRunnerTool, clearRunnerTool, rememberRunnerTool } = jiti("./tool-scope.ts");
+const { activeRunnerOwner, rememberRunnerDefinition } = jiti("./ownership.ts");
 const { runRunnerController, turnInProgressReason } = jiti("./controller.ts");
 const publicApi = jiti("./index.ts");
 const { Type } = require("typebox");
@@ -149,9 +150,15 @@ function event(kind, data = {}) {
 
   {
     const imported = plan();
+    imported.metadata = { kind: "demo" };
+    imported.units[0].metadata = { unit: true };
+    imported.units[0].tasks[0].metadata = { task: true };
     imported.units[0].tasks[0].evidence = "should be reset";
     const approved = approvePlan(createRun(definition, "intent"), definition, imported);
     assert.equal(approved.ok, true);
+    assert.equal(approved.value.plan.metadata.kind, "demo");
+    assert.equal(approved.value.plan.units[0].metadata.unit, true);
+    assert.equal(approved.value.plan.units[0].tasks[0].metadata.task, true);
     assert.equal(approved.value.plan.units[0].tasks[0].evidence, undefined);
   }
 
@@ -161,11 +168,25 @@ function event(kind, data = {}) {
     run = updateTask(run, { id: "t1", evidence: "proof" }).value;
     assert.equal(run.currentTaskId, undefined);
     assert.equal(run.plan.units[0].tasks[0].evidence, "proof");
+    assert.equal(run.plan.units[0].tasks[0].reports.length, 1);
 
     const first = rollUpUnit(run, "s1", { summaryEntryId: "summary" });
     assert.equal(first.ok, true);
     const second = rollUpUnit(first.value, "s1", { summaryEntryId: "summary-2" });
     assert.equal(second.ok, false);
+  }
+
+  {
+    rememberRunnerDefinition(definition);
+    const robopi = { ...definition, id: "robopi", label: "RoboPi", tool: { name: "robopi" } };
+    rememberRunnerDefinition(robopi);
+    const run = createRun(definition, "intent");
+    const ctx = {
+      sessionManager: {
+        getBranch: () => [entry("created", "created", run.id, { intent: run.intent })],
+      },
+    };
+    assert.equal(activeRunnerOwner(ctx, "robopi")?.definition.id, "goal");
   }
 
   {
@@ -292,6 +313,7 @@ function event(kind, data = {}) {
       ctx,
     );
     assert.equal(readRun(ctx, "goal")?.plan.units[0].tasks[0].evidence, "proof");
+    assert.equal(readRun(ctx, "goal")?.plan.units[0].tasks[0].reports.length, 1);
   }
 
   {

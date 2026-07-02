@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { scheduleRunnerController, resetRunnerContext } from "./controller.ts";
 import { registerRunnerCommand } from "./command.ts";
+import { rememberRunnerDefinition } from "./ownership.ts";
 import { registerRunnerTool } from "./tool.ts";
 import { clearRunnerTool, rememberRunnerTool } from "./tool-scope.ts";
 import type { RunnerDefinition } from "./types.ts";
@@ -23,6 +24,7 @@ export function registerRunner(
   definition: RunnerDefinition,
   options: RegisterRunnerOptions = {},
 ): void {
+  rememberRunnerDefinition(definition);
   if (options.command !== false) registerRunnerCommand(pi, definition);
   rememberRunnerTool(definition);
   if (options.tool !== false) registerRunnerTool(pi, definition);

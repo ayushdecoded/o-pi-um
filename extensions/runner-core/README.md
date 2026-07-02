@@ -12,7 +12,8 @@ Core manages:
 - task evidence validation
 - pause/resume/complete transitions
 - unit rollup boundaries
-- one model-visible runner tool at a time per session
+- one active runner owner per session
+- model-hidden packet ids for task attempts
 - default command/tool/controller plumbing that runners can override piecemeal
 
 Core does not manage:
@@ -66,7 +67,7 @@ const goalRunner = {
 };
 ```
 
-Run entries are compact facts, not full snapshots. Core events are discriminated payloads: `run.created`, `plan.approved`, `task.assigned`, `task.reported`, `unit.rolled_up`, `run.paused`, `run.resumed`, `run.completed`, `run.cleared`. Feature events are namespaced separately and never affect core replay.
+Run entries are compact facts, not full snapshots. Core events are discriminated payloads: `run.created`, `plan.approved`, `task.assigned`, `task.reported`, `unit.rolled_up`, `run.paused`, `run.resumed`, `run.completed`, `run.cleared`. Feature events are namespaced separately and never affect core replay. Effect failures are recorded as runner-core feature events.
 
 Customization stays narrow and composable:
 
@@ -74,5 +75,6 @@ Customization stays narrow and composable:
 - `command.actions` adds slash-command actions; replacing a built-in requires `overrideDefault:true`.
 - `tool.actions` adds model-facing actions; replacing a built-in requires `overrideDefault:true`.
 - `effects` react to durable core events and can persist namespaced feature events.
+- `metadata` on plans, units, and tasks carries runner-specific data without changing core scheduling.
 
 RoboPi can remain a thin definition until it has real external behavior. Worktree/GitHub behavior should stay outside core.

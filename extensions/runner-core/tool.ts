@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type TSchema } from "typebox";
@@ -11,10 +13,12 @@ import {
   type PlanInput,
   type TaskUpdateInput,
 } from "./plan.ts";
+import { activeRunnerOwner } from "./ownership.ts";
 import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
 import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
-import { approvePlan, pauseRun, updateTask } from "./transitions.ts";
+import { approvePlan, failTask, updateTask } from "./transitions.ts";
 import type { RunnerDefinition, RunnerToolAction, RunnerToolResult, RunState } from "./types.ts";
+import { toRunView } from "./view.ts";
 
 export type RunnerToolParams =
   | { action: "approve"; contract: string; plan: PlanInput }
@@ -52,6 +56,8 @@ async function executeRunnerTool(
   const actionName = typeof params.action === "string" ? params.action : "";
   const action = actions.find((item) => item.action === actionName);
   if (!action) fail(`Unknown ${definition.label} tool action: ${actionName || "<missing>"}.`);
+  const owner = activeRunnerOwner(ctx, definition.id);
+  if (owner) fail(`${owner.definition.label} owns this session.`);
   const run = readRun(ctx, definition.id);
   const packet = currentRunnerPacket(ctx, definition);
   // Custom actions are run-bound by default too; actions that intentionally work
@@ -65,7 +71,7 @@ async function executeRunnerTool(
     ctx,
     definition,
     params,
-    run,
+    run: toRunView(run),
     appendFeatureEvent: (type, payload, namespace = definition.id) => {
       if (!run) throw new Error(`No ${definition.label} run is active.`);
       return appendFeatureEvent(pi, ctx, {
@@ -110,9 +116,11 @@ async function approvePlanFromTool({
   run,
 }: Parameters<RunnerToolAction["execute"]>[0]): Promise<RunnerToolResult> {
   if (!run || run.status !== "setup") fail(`No ${definition.label} setup is active.`);
-  assertPacketMatchesRun(currentRunnerPacket(ctx, definition), run, definition, "setup");
+  const setupRun = readRun(ctx, definition.id);
+  if (!setupRun || setupRun.status !== "setup") fail(`No ${definition.label} setup is active.`);
+  assertPacketMatchesRun(currentRunnerPacket(ctx, definition), setupRun, definition, "setup");
   const clean = normalizePlan(String(params.contract ?? ""), params.plan as PlanInput);
-  const approved = approvePlan(run, definition, clean);
+  const approved = approvePlan(setupRun, definition, clean);
   if (!approved.ok) fail(formatIssues(approved.message, approved.issues));
   const event = { type: "plan.approved", plan: approved.value.plan! } as const;
   const entryId = appendCoreEvent(pi, ctx, {
@@ -133,21 +141,26 @@ async function updateTaskFromTool({
   run,
 }: Parameters<RunnerToolAction["execute"]>[0]): Promise<RunnerToolResult> {
   if (!run || run.status !== "active") fail(`No active ${definition.label} run.`);
+  const activeRun = readRun(ctx, definition.id);
+  if (!activeRun || activeRun.status !== "active") fail(`No active ${definition.label} run.`);
   const packet = currentRunnerPacket(ctx, definition);
-  assertPacketMatchesRun(packet, run, definition, "work");
-  const update = normalizeTaskUpdate(params as TaskUpdateInput);
+  assertPacketMatchesRun(packet, activeRun, definition, "work");
+  const update = normalizeTaskUpdate({ ...(params as TaskUpdateInput), attemptId: randomUUID() });
   if (!update?.evidence) fail("Provide task evidence for the assigned task.");
   if (params.result === "failed") {
-    if (!run.currentTaskId) fail("No task is currently assigned.");
-    if (update.id !== run.currentTaskId)
+    if (!activeRun.currentTaskId) fail("No task is currently assigned.");
+    if (update.id !== activeRun.currentTaskId)
       fail(`Task ${update.id} is not the current assigned task.`);
     assertPacketTaskMatches(packet, update.id, definition);
-    const failed = pauseRun({ ...run, currentTaskId: undefined }, "task_failed", update.evidence);
+    const failedResult = failTask(activeRun, update);
+    if (!failedResult.ok) fail(formatIssues(failedResult.message, failedResult.issues));
+    const failed = failedResult.value;
     const event = {
       type: "task.reported",
       taskId: update.id,
       result: "failed",
       evidence: update.evidence,
+      attemptId: update.attemptId!,
     } as const;
     const entryId = appendCoreEvent(pi, ctx, {
       runnerId: definition.id,
@@ -160,13 +173,14 @@ async function updateTaskFromTool({
   }
 
   assertPacketTaskMatches(packet, update.id, definition);
-  const updated = updateTask(run, update);
+  const updated = updateTask(activeRun, update);
   if (!updated.ok) fail(formatIssues(updated.message, updated.issues));
   const event = {
     type: "task.reported",
     taskId: update.id,
     result: "complete",
     evidence: update.evidence,
+    attemptId: update.attemptId!,
   } as const;
   const entryId = appendCoreEvent(pi, ctx, {
     runnerId: definition.id,
@@ -292,6 +306,7 @@ const strict = { additionalProperties: false } as const;
 
 const PlanSchema = Type.Object(
   {
+    metadata: Type.Optional(Type.Record(Type.String(), Type.Any())),
     units: Type.Array(
       Type.Object(
         {
@@ -301,6 +316,7 @@ const PlanSchema = Type.Object(
           dependsOn: Type.Optional(
             Type.Array(Type.String({ description: "Earlier unit ids this unit depends on." })),
           ),
+          metadata: Type.Optional(Type.Record(Type.String(), Type.Any())),
           tasks: Type.Array(
             Type.Object(
               {
@@ -311,6 +327,7 @@ const PlanSchema = Type.Object(
                 dependsOn: Type.Optional(
                   Type.Array(Type.String({ description: "Earlier same-unit task ids." })),
                 ),
+                metadata: Type.Optional(Type.Record(Type.String(), Type.Any())),
               },
               strict,
             ),
