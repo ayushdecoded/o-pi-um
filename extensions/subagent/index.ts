@@ -54,7 +54,7 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
     parameters: SubagentParams,
     async execute(_id, params: SubagentParamsType, signal, onUpdate, ctx) {
       const options = params.options ?? {};
-      const tasks = params.tasks?.map((task) => task.trim()).filter(Boolean) ?? [];
+      const tasks = taskInstructions(params);
       const sessionFiles = followupSessionFiles(params);
       if (tasks.length === 0) throw new Error("Provide `tasks` with at least one instruction.");
       if (sessionFiles.length > 0) {
@@ -160,12 +160,23 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
   };
 }
 
+function taskInstructions(params: SubagentParamsType): string[] {
+  const tasks = params.tasks?.map((task) => task.trim()) ?? [];
+  if (tasks.some((task) => !task)) throw new Error("Task instructions cannot be blank.");
+  return tasks;
+}
+
 function followupSessionFiles(params: SubagentParamsType): string[] {
-  const plural = params.sessionFiles?.map((file) => file.trim()).filter(Boolean) ?? [];
-  const singular = params.sessionFile?.trim();
-  if (singular && plural.length > 0)
-    throw new Error("Use either sessionFiles or legacy sessionFile, not both.");
-  return (singular ? [singular] : plural).map(canonicalSessionFile);
+  const singular = params.sessionFile;
+  const singularPath = singular?.trim();
+  if (singular !== undefined && !singularPath) throw new Error("sessionFile cannot be blank.");
+  if (params.sessionFiles === undefined)
+    return singularPath ? [canonicalSessionFile(singularPath)] : [];
+  if (params.sessionFiles.length === 0) throw new Error("sessionFiles cannot be empty.");
+  if (singularPath) throw new Error("Use either sessionFiles or legacy sessionFile, not both.");
+  const plural = params.sessionFiles.map((file) => file.trim());
+  if (plural.some((file) => !file)) throw new Error("sessionFiles cannot contain blank paths.");
+  return plural.map(canonicalSessionFile);
 }
 
 function canonicalSessionFile(file: string): string {
