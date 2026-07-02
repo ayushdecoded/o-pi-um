@@ -1,4 +1,4 @@
-import type { RunnerRunView, RunState, WorkUnit } from "./types.ts";
+import type { RunnerRunView, RunState, WorkTask, WorkUnit } from "./types.ts";
 
 export function toRunView(run: RunState | null): RunnerRunView | null {
   if (!run) return null;
@@ -25,7 +25,14 @@ export function toRunView(run: RunState | null): RunnerRunView | null {
 }
 
 export function toPublicUnit(unit: WorkUnit): WorkUnit {
-  const { runner: _runner, ...publicFields } = unit as WorkUnit & { runner?: unknown };
+  const { runner: _runner, tasks, ...publicFields } = unit as WorkUnit & { runner?: unknown };
+  return { ...clone(publicFields), tasks: tasks.map(toPublicTask) };
+}
+
+function toPublicTask(task: WorkTask): WorkTask {
+  // Attempt ids are hidden packet ids. Keep task evidence visible, but do not
+  // expose retry/attempt internals to prompts or extension-facing APIs.
+  const { reports: _reports, ...publicFields } = task;
   return clone(publicFields);
 }
 

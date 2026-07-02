@@ -10,6 +10,7 @@ const { registerRunnerScheduler } = jiti("./registry.ts");
 const { activateRunnerTool, clearRunnerTool, rememberRunnerTool } = jiti("./tool-scope.ts");
 const { activeRunnerOwner, rememberRunnerDefinition } = jiti("./ownership.ts");
 const { runRunnerController, turnInProgressReason } = jiti("./controller.ts");
+const { toRunView, toPublicUnit } = jiti("./view.ts");
 const publicApi = jiti("./index.ts");
 const { Type } = require("typebox");
 
@@ -177,6 +178,8 @@ function event(kind, data = {}) {
     assert.equal(run.currentTaskId, undefined);
     assert.equal(run.plan.units[0].tasks[0].evidence, "proof");
     assert.equal(run.plan.units[0].tasks[0].reports.length, 1);
+    assert.equal(toRunView(run).plan.units[0].tasks[0].reports, undefined);
+    assert.equal(toPublicUnit(run.plan.units[0]).tasks[0].reports, undefined);
 
     const first = rollUpUnit(run, "s1", { summaryEntryId: "summary" });
     assert.equal(first.ok, true);
