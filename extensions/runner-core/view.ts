@@ -29,7 +29,7 @@ export function toPublicUnit(unit: WorkUnit): WorkUnit {
   return { ...clone(publicFields), tasks: tasks.map(toPublicTask) };
 }
 
-function toPublicTask(task: WorkTask): WorkTask {
+export function toPublicTask(task: WorkTask): WorkTask {
   // Attempt ids are hidden packet ids. Keep task evidence visible, but do not
   // expose retry/attempt internals to prompts or extension-facing APIs.
   const { reports: _reports, ...publicFields } = task;

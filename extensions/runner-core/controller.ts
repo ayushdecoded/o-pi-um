@@ -24,7 +24,7 @@ import { appendCoreEvent, readRun } from "./store.ts";
 import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { hasAssignedIncompleteTask, startNextWork, unitReadyToRollUp } from "./transitions.ts";
 import type { ReadyWork, RunnerDefinition, RunState } from "./types.ts";
-import { toPublicUnit, toRunView } from "./view.ts";
+import { toPublicTask, toPublicUnit, toRunView } from "./view.ts";
 
 export { rememberRunnerContext, resetRunnerContext, turnInProgressReason } from "./runtime.ts";
 
@@ -201,7 +201,7 @@ function sendAssignedWorkTurn(
     definition.workPrompt({
       run: toRunView(run)!,
       unit: toPublicUnit(work.unit),
-      task: work.task,
+      task: toPublicTask(work.task),
       summaries: run.summaries,
     }),
     {

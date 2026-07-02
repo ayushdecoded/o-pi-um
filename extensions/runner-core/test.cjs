@@ -632,6 +632,69 @@ function event(kind, data = {}) {
     assert.match(turnInProgressReason(queuedCtx), /already queued/);
   }
 
+  {
+    const entries = [];
+    const pi = {
+      appendEntry(customType, data) {
+        entries.push({ id: `e${entries.length}`, type: "custom", customType, data });
+        return entries.at(-1).id;
+      },
+      sendMessage(message) {
+        entries.push({
+          id: `m${entries.length}`,
+          type: "custom_message",
+          customType: message.customType,
+          details: message.details,
+          content: message.content,
+        });
+      },
+    };
+    const ctx = {
+      hasUI: false,
+      ui: { notify() {} },
+      sessionManager: {
+        getBranch: () => entries,
+        getLeafId: () => entries.at(-1)?.id,
+        getSessionFile: () => "session.jsonl",
+        getSessionId: () => "session",
+        getLeafEntry: () => entries.at(-1),
+      },
+    };
+    let promptTask;
+    const promptDefinition = {
+      ...definition,
+      workPrompt(input) {
+        promptTask = input.task;
+        return "";
+      },
+    };
+    const run = createRun(promptDefinition, "intent");
+    const approved = approvePlan(run, promptDefinition, plan()).value;
+    pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("created", run.id, { intent: run.intent }));
+    pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("plan-approved", run.id, { plan: approved.plan }));
+    pi.appendEntry(
+      RUNNER_ENTRY_TYPE,
+      eventData("task-assigned", run.id, {
+        unitId: "s1",
+        taskId: "t1",
+        packetId: "attempt-1",
+      }),
+    );
+    pi.appendEntry(
+      RUNNER_ENTRY_TYPE,
+      eventData("task-failed", run.id, {
+        taskId: "t1",
+        evidence: "blocked",
+        attemptId: "attempt-1",
+      }),
+    );
+    pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("resumed", run.id));
+
+    await runRunnerController(pi, promptDefinition, ctx);
+    assert.equal(readRun(ctx, "goal")?.plan.units[0].tasks[0].reports[0].attemptId, "attempt-1");
+    assert.equal(promptTask.reports, undefined);
+  }
+
   console.log("runner-core tests passed");
 })().catch((error) => {
   console.error(error);
