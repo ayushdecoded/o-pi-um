@@ -10,7 +10,7 @@ Cover the important events in the order they happened:
 - Problems, blockers, risks, and unresolved questions
 - Current state and clear next steps
 
-If this is a long-running session with too much context to inspect directly, first deploy cheap subagents to analyze the session history, then synthesize their findings into one chronological handoff.
+Use only the session context available to you. If important history is unavailable, say what is missing instead of guessing.
 
 Do not mention a new agent. Do not do new work; only write the handoff.`;
 

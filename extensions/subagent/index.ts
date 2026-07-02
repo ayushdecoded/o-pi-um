@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { SESSION_ROOT } from "./constants.ts";
+import { normalizeSessionFile } from "./primitives/session.ts";
 import { resolveModelRoute, validateModelsMd } from "./models.ts";
 import { formatSubagentPrompt } from "./prompt.ts";
 import { resetRuntime } from "./runtime.ts";
@@ -54,7 +55,11 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
     async execute(_id, params: SubagentParamsType, signal, onUpdate, ctx) {
       const options = params.options ?? {};
       const tasks = params.tasks?.map((task) => task.trim()).filter(Boolean) ?? [];
-      const sessionFiles = params.sessionFiles?.map((file) => file.trim()).filter(Boolean) ?? [];
+      const sessionFiles =
+        params.sessionFiles
+          ?.map((file) => file.trim())
+          .filter(Boolean)
+          .map(canonicalSessionFile) ?? [];
       if (tasks.length === 0) throw new Error("Provide `tasks` with at least one instruction.");
       if (sessionFiles.length > 0) {
         if (tasks.length !== 1 && tasks.length !== sessionFiles.length)
@@ -156,6 +161,15 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
       return new Text(renderRunsForUser(result.details?.runs, fallback, theme), 0, 0);
     },
   };
+}
+
+function canonicalSessionFile(file: string): string {
+  const normalized = normalizeSessionFile(file);
+  try {
+    return fs.realpathSync(normalized);
+  } catch {
+    return normalized;
+  }
 }
 
 function registerSubagentResultStatus(pi: ExtensionAPI): void {
