@@ -7,7 +7,7 @@ Tmux-backed Pi child sessions for delegated work.
 ```ts
 subagent({
   tasks?: string[],
-  sessionFile?: string,
+  sessionFiles?: string[],
   options?: { model?: string; reasoning?: string; timeout?: number },
 })
 ```
@@ -16,7 +16,8 @@ subagent({
 
 - `tasks: ["..."]` starts one child Pi session.
 - `tasks: ["...", "..."]` runs independent child sessions in parallel.
-- `sessionFile` plus exactly one task sends a follow-up to an existing child session under `~/.pi/agent/subagent-sessions`.
+- `sessionFiles` plus one task sends the same follow-up to one or more existing child sessions in parallel.
+- `sessionFiles` plus the same number of tasks sends positional follow-ups in parallel.
 - Child sessions live under `~/.pi/agent/subagent-sessions`.
 - Run logs live under `~/.pi/agent/subagent-sessions/runs/<run-id>`.
 - Requires `tmux`.

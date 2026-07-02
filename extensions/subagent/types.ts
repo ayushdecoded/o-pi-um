@@ -17,7 +17,7 @@ export type SubagentOptionsType = {
 
 export type SubagentParamsType = {
   tasks?: string[];
-  sessionFile?: string;
+  sessionFiles?: string[];
   options?: SubagentOptionsType;
 };
 

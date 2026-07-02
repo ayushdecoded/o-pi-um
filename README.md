@@ -6,7 +6,7 @@ Personal Pi package.
 
 - `runner-core`: reusable dependency-graph work runner over Pi session primitives.
 - `goal`: thin Goal definition on top of `runner-core`.
-- `subagent`: tmux-backed child Pi sessions, parallel fan-out, follow-ups by `sessionFile`, and project model routes.
+- `subagent`: tmux-backed child Pi sessions, parallel fan-out, follow-ups by `sessionFiles`, and project model routes.
 - `compaction`: routes native Pi compaction through the `.pi/MODELS.md` `Compaction` model.
 - `footer`: compact TUI footer with context, parent usage, subagent usage, cache hit, cost, and model.
 - `browser`: local browser automation with compact snapshots and element refs. Public params are `action`, `target`, and `text`.
