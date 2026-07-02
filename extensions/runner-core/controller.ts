@@ -83,6 +83,14 @@ export async function runRunnerController(
   ctx: ExtensionCommandContext,
 ): Promise<void> {
   rememberRunnerContext(definition, ctx);
+  const owner = activeRunnerOwner(ctx, definition.id);
+  if (owner) {
+    clearRunnerTool(pi, ctx, definition);
+    return void ctx.ui.notify(
+      `${owner.definition.label} owns this session. Clear or complete it before running ${definition.label}.`,
+      "warning",
+    );
+  }
   const initial = readRun(ctx, definition.id);
   if (!initial) {
     clearRunnerTool(pi, ctx, definition);

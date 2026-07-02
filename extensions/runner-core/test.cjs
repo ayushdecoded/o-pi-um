@@ -201,6 +201,49 @@ function event(kind, data = {}) {
   }
 
   {
+    const robopi = {
+      ...definition,
+      id: "robopi",
+      label: "RoboPi",
+      command: { name: "robopi" },
+      tool: { name: "robopi" },
+    };
+    rememberRunnerDefinition(definition);
+    rememberRunnerDefinition(robopi);
+    const goalRun = createRun(definition, "goal intent");
+    const roboRun = createRun(robopi, "robo intent");
+    const entries = [
+      entry("goal-created", "created", goalRun.id, { intent: goalRun.intent }),
+      {
+        id: "robo-created",
+        type: "custom",
+        customType: RUNNER_ENTRY_TYPE,
+        data: {
+          version: 1,
+          scope: "core",
+          runnerId: "robopi",
+          runId: roboRun.id,
+          timestamp: 1,
+          event: { type: "run.created", intent: roboRun.intent },
+        },
+      },
+    ];
+    const sent = [];
+    const notices = [];
+    await runRunnerController({ sendMessage: (message) => sent.push(message) }, robopi, {
+      ui: { notify: (message) => notices.push(message) },
+      sessionManager: {
+        getBranch: () => entries,
+        getLeafEntry: () => entries.at(-1),
+        getSessionFile: () => "session.jsonl",
+        getSessionId: () => "session",
+      },
+    });
+    assert.equal(sent.length, 0);
+    assert.match(notices.join("\n"), /Goal owns this session/);
+  }
+
+  {
     const schedulerDefinition = {
       ...definition,
       id: "scheduler-only",
