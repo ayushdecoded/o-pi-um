@@ -424,7 +424,7 @@ function applyRolledUpTaskFacts(run: RunState, unitId: string, tasks: UnitRollup
     const task = unit.tasks.find((item) => item.id === fact.id);
     if (task && fact.evidence?.trim()) {
       task.evidence = fact.evidence;
-      task.reports = fact.reports;
+      if (fact.reports !== undefined) task.reports = fact.reports;
     }
   }
 }

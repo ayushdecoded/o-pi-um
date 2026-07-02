@@ -32,6 +32,7 @@ export function registerRunner(
 }
 
 export function registerRunnerScheduler(pi: ExtensionAPI, definition: RunnerDefinition): void {
+  rememberRunnerDefinition(definition);
   pi.on("agent_end", async (_event, ctx) => {
     scheduleRunnerController(pi, definition, ctx);
   });

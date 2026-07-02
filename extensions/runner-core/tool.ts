@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type TSchema } from "typebox";
@@ -145,7 +143,9 @@ async function updateTaskFromTool({
   if (!activeRun || activeRun.status !== "active") fail(`No active ${definition.label} run.`);
   const packet = currentRunnerPacket(ctx, definition);
   assertPacketMatchesRun(packet, activeRun, definition, "work");
-  const update = normalizeTaskUpdate({ ...(params as TaskUpdateInput), attemptId: randomUUID() });
+  const attemptId = packet?.packetId ?? activeRun.currentTaskPacketId;
+  if (!attemptId) fail(`${definition.label} work packet is missing an attempt id.`);
+  const update = normalizeTaskUpdate({ ...(params as TaskUpdateInput), attemptId });
   if (!update?.evidence) fail("Provide task evidence for the assigned task.");
   if (params.result === "failed") {
     if (!activeRun.currentTaskId) fail("No task is currently assigned.");
