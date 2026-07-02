@@ -79,7 +79,21 @@ export async function runPiSubagent(
   );
 }
 
-export async function messageSubagentSession(
+export async function messageSubagentSessions(
+  params: {
+    followups: FollowupParamsType[];
+  },
+  ctx: ExtensionContext,
+  signal?: AbortSignal,
+): Promise<RunDetails[]> {
+  return Promise.all(
+    params.followups
+      .slice(0, MAX_ACTIVE)
+      .map((followup) => messageSubagentSession(followup, ctx, signal)),
+  );
+}
+
+async function messageSubagentSession(
   params: FollowupParamsType,
   ctx: ExtensionContext,
   signal?: AbortSignal,

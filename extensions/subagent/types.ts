@@ -17,6 +17,8 @@ export type SubagentOptionsType = {
 
 export type SubagentParamsType = {
   tasks?: string[];
+  sessionFiles?: string[];
+  /** Legacy singular follow-up field; accepted so old calls do not spawn fresh sessions. */
   sessionFile?: string;
   options?: SubagentOptionsType;
 };

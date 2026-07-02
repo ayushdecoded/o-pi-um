@@ -2,10 +2,11 @@ import * as fs from "node:fs";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { SESSION_ROOT } from "./constants.ts";
+import { normalizeSessionFile } from "./primitives/session.ts";
 import { resolveModelRoute, validateModelsMd } from "./models.ts";
 import { formatSubagentPrompt } from "./prompt.ts";
 import { resetRuntime } from "./runtime.ts";
-import { messageSubagentSession, runParallelSubagents, runPiSubagent } from "./runner.ts";
+import { messageSubagentSessions, runParallelSubagents, runPiSubagent } from "./runner.ts";
 import { SubagentParams } from "./schema.ts";
 import { formatParallelRuns, formatRun, renderRunsForUser, shortTask } from "./text.ts";
 import type { SubagentParamsType, ToolDetails } from "./types.ts";
@@ -49,30 +50,42 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
     name: "subagent",
     label: "Subagent",
     description:
-      "Spawn child Pi sessions from tasks, run them in parallel, or follow up with an existing child session via sessionFile.",
+      "Spawn child Pi sessions from tasks, run them in parallel, or follow up with existing child sessions via sessionFiles.",
     parameters: SubagentParams,
     async execute(_id, params: SubagentParamsType, signal, onUpdate, ctx) {
       const options = params.options ?? {};
-      const tasks = params.tasks?.map((task) => task.trim()).filter(Boolean) ?? [];
+      const tasks = taskInstructions(params);
+      const sessionFiles = followupSessionFiles(params);
       if (tasks.length === 0) throw new Error("Provide `tasks` with at least one instruction.");
-      if (params.sessionFile?.trim() && tasks.length !== 1)
-        throw new Error("Use `sessionFile` only with exactly one follow-up task.");
-      // `sessionFile` means continue an existing child instead of spawning a related duplicate.
-      if (params.sessionFile?.trim()) {
-        const run = await messageSubagentSession(
+      if (sessionFiles.length > 0) {
+        if (tasks.length !== 1 && tasks.length !== sessionFiles.length)
+          throw new Error(
+            "Use follow-up sessionFiles with either one shared task or one task per session file.",
+          );
+        if (new Set(sessionFiles).size !== sessionFiles.length)
+          throw new Error("Duplicate follow-up session files are not supported in one tool call.");
+
+        const runs = await messageSubagentSessions(
           {
-            sessionFile: params.sessionFile,
-            message: tasks[0],
-            model: options.model,
-            reasoning: options.reasoning,
-            timeout: options.timeout,
+            followups: sessionFiles.map((file, index) => ({
+              sessionFile: file,
+              message: tasks.length === 1 ? tasks[0] : tasks[index],
+              model: options.model,
+              reasoning: options.reasoning,
+              timeout: options.timeout,
+            })),
           },
           ctx,
           signal,
         );
         return {
-          content: [{ type: "text", text: formatRun(run) }],
-          details: { runs: [run] },
+          content: [
+            {
+              type: "text",
+              text: runs.length === 1 ? formatRun(runs[0]) : formatParallelRuns(runs),
+            },
+          ],
+          details: { runs },
         };
       }
       // Multiple tasks fan out; one task is the solo path.
@@ -124,12 +137,16 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
     },
     renderCall(args, theme) {
       const taskCount = args.tasks?.length ?? 0;
+      const legacySessionFile = (args as { sessionFile?: string }).sessionFile;
+      const followupCount = args.sessionFiles?.length ?? (legacySessionFile ? 1 : 0);
       const action =
-        taskCount > 1
-          ? `${taskCount} parallel jobs`
-          : args.sessionFile
+        followupCount > 1
+          ? `${followupCount} parallel follow-ups`
+          : followupCount === 1
             ? `follow-up: ${args.tasks?.[0] ?? ""}`
-            : (args.tasks?.[0] ?? "");
+            : taskCount > 1
+              ? `${taskCount} parallel jobs`
+              : (args.tasks?.[0] ?? "");
       return new Text(
         `${theme.fg("toolTitle", theme.bold("subagent"))}: ${theme.fg("accent", shortTask(action))}`,
         0,
@@ -141,6 +158,34 @@ function createSubagentTool(pi: ExtensionAPI): ToolDefinition<typeof SubagentPar
       return new Text(renderRunsForUser(result.details?.runs, fallback, theme), 0, 0);
     },
   };
+}
+
+function taskInstructions(params: SubagentParamsType): string[] {
+  const tasks = params.tasks?.map((task) => task.trim()) ?? [];
+  if (tasks.some((task) => !task)) throw new Error("Task instructions cannot be blank.");
+  return tasks;
+}
+
+function followupSessionFiles(params: SubagentParamsType): string[] {
+  const singular = params.sessionFile;
+  const singularPath = singular?.trim();
+  if (singular !== undefined && !singularPath) throw new Error("sessionFile cannot be blank.");
+  if (params.sessionFiles === undefined)
+    return singularPath ? [canonicalSessionFile(singularPath)] : [];
+  if (params.sessionFiles.length === 0) throw new Error("sessionFiles cannot be empty.");
+  if (singularPath) throw new Error("Use either sessionFiles or legacy sessionFile, not both.");
+  const plural = params.sessionFiles.map((file) => file.trim());
+  if (plural.some((file) => !file)) throw new Error("sessionFiles cannot contain blank paths.");
+  return plural.map(canonicalSessionFile);
+}
+
+function canonicalSessionFile(file: string): string {
+  const normalized = normalizeSessionFile(file);
+  try {
+    return fs.realpathSync(normalized);
+  } catch {
+    return normalized;
+  }
 }
 
 function registerSubagentResultStatus(pi: ExtensionAPI): void {

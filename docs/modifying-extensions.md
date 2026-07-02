@@ -36,7 +36,7 @@ Good:
 ```text
 action, target, text
 query, url, mode, section
-task, tasks, sessionFile, options
+task, tasks, sessionFiles, options
 ```
 
 Some extensions, like `compaction`, expose no model-facing tool and only attach lifecycle policy.

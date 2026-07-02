@@ -17,7 +17,9 @@ Current model-facing shapes:
 ```ts
 subagent({ tasks: [task] })
 subagent({ tasks: [taskA, taskB] })
-subagent({ sessionFile, tasks: [followUpTask] })
+subagent({ sessionFiles: [sessionFile], tasks: [followUpTask] })
+subagent({ sessionFiles, tasks: [sharedFollowUpTask] })
+subagent({ sessionFiles, tasks: [followUpA, followUpB] })
 subagent({ options: { model?, reasoning?, timeout? } })
 ```
 
@@ -25,8 +27,9 @@ Rules:
 
 - one task starts one fresh child session.
 - multiple tasks fan out independent fresh child sessions in parallel.
-- `sessionFile` with exactly one task follows up an existing child session.
-- Do not copy child transcripts into the parent; return `sessionFile` for follow-ups.
+- `sessionFiles` follows up existing child sessions in parallel; use one shared task or one task per session file.
+- A single follow-up is just `sessionFiles: [sessionFile]`.
+- Do not copy child transcripts into the parent; return `sessionFile` in run results for follow-ups.
 
 ## Execution flow
 
@@ -102,7 +105,7 @@ Fresh child sessions are stored under:
 ~/.pi/agent/subagent-sessions
 ```
 
-Follow-ups normalize the provided `sessionFile` path and only accept existing top-level subagent child JSONL files under `~/.pi/agent/subagent-sessions`.
+Follow-ups normalize each provided `sessionFiles` path and only accept existing top-level subagent child JSONL files under `~/.pi/agent/subagent-sessions`.
 
 ## Model routing
 
@@ -184,7 +187,9 @@ Smoke tests:
 ```text
 subagent({ tasks: ["say OK"] })
 subagent({ tasks: ["A", "B"] })
-subagent({ sessionFile: "...", tasks: ["what did you say?"] })
+subagent({ sessionFiles: ["..."], tasks: ["what did you say?"] })
+subagent({ sessionFiles: ["...", "..."], tasks: ["same follow-up"] })
+subagent({ sessionFiles: ["...", "..."], tasks: ["follow-up A", "follow-up B"] })
 ```
 
 For timeout behavior:

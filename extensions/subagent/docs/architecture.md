@@ -21,5 +21,5 @@ subagent tool -> runner -> pi-runner -> primitives
 ```
 
 Fresh runs create child session files under `~/.pi/agent/subagent-sessions`.
-Follow-ups reuse the provided `sessionFile`.
+Follow-ups reuse the provided `sessionFiles` entries.
 Run artifacts live under `~/.pi/agent/subagent-sessions/runs/<run-id>`.

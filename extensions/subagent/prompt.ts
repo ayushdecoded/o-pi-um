@@ -8,5 +8,5 @@ export function formatSubagentPrompt(ctx: ExtensionContext): string {
   const routeText = routes.length
     ? `Use .pi/MODELS.md section names for subagent model routing when available: ${routes.join(", ")}.`
     : "Use explicit provider/model ids when selecting subagent models.";
-  return `Subagents: use subagent for targeted parallel work; pass sessionFile to subagent for follow-ups on an existing child session instead of spawning a new related child. Never read child JSONL unless asked. ${routeText} Keep subagent tasks narrow so cheaper/faster routes can be used. Max ${MAX_ACTIVE} active, depth ${MAX_DEPTH}.`;
+  return `Subagents: use subagent for targeted parallel work; pass sessionFiles for follow-ups to existing child sessions (one shared task or one task per session). Never read child JSONL unless asked. ${routeText} Keep subagent tasks narrow so cheaper/faster routes can be used. Max ${MAX_ACTIVE} active, depth ${MAX_DEPTH}.`;
 }

@@ -28,7 +28,8 @@
       "./extensions/compaction/index.ts",
       "./extensions/footer/index.ts",
       "./extensions/browser/index.ts",
-      "./extensions/web-search/index.ts"
+      "./extensions/web-search/index.ts",
+      "./extensions/handoff/index.ts"
     ],
     "skills": [
       "./skills",
