@@ -8,9 +8,11 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { rememberRunnerContext, runRunnerController, turnInProgressReason } from "./controller.ts";
 import { emitRunnerEvent } from "./effects.ts";
 import { runStatusText } from "./format.ts";
+import { activeRunnerOwner } from "./ownership.ts";
 import { appendCoreEvent, appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
 import { activateRunnerTool, clearRunnerTool } from "./tool-scope.ts";
 import { createRun, pauseRun, resumeRun } from "./transitions.ts";
+import { toRunView } from "./view.ts";
 import type {
   RunnerCommandAction,
   RunnerCommandApi,
@@ -60,7 +62,7 @@ function defaultCommandActions(): RunnerCommandAction[] {
     {
       name: "status",
       description: "Show current run status.",
-      handler: (_input, api) => notifyStatus(api.ctx, api.definition, api.readRun()),
+      handler: (_input, api) => notifyStatus(api.ctx, api.definition, currentRun(api)),
     },
     {
       name: "help",
@@ -96,7 +98,16 @@ async function startCommand(input: RunnerCommandInput, api: RunnerCommandApi): P
       "warning",
     );
 
-  const existing = api.readRun();
+  const owner = activeRunnerOwner(api.ctx, api.definition.id);
+  if (owner) {
+    api.ctx.ui.notify(
+      `${owner.definition.label} already owns this session. Clear or complete it before starting ${api.definition.label}.`,
+      "warning",
+    );
+    return;
+  }
+
+  const existing = currentRun(api);
   if (existing && existing.status !== "complete") {
     const ok =
       !api.ctx.hasUI ||
@@ -125,7 +136,7 @@ async function startCommand(input: RunnerCommandInput, api: RunnerCommandApi): P
 }
 
 async function pauseCommand(_input: RunnerCommandInput, api: RunnerCommandApi): Promise<void> {
-  const run = api.readRun();
+  const run = currentRun(api);
   if (!run || run.status !== "active") {
     api.ctx.ui.notify(`No active ${api.definition.label} run to pause.`, "warning");
     return;
@@ -146,7 +157,7 @@ async function pauseCommand(_input: RunnerCommandInput, api: RunnerCommandApi): 
 }
 
 async function clearCommand(_input: RunnerCommandInput, api: RunnerCommandApi): Promise<void> {
-  const run = api.readRun();
+  const run = currentRun(api);
   if (!run) return void api.ctx.ui.notify(`No ${api.definition.label} run to clear.`, "warning");
   const event = { type: "run.cleared" } as const;
   const entryId = appendCoreEvent(api.pi, api.ctx, {
@@ -162,7 +173,7 @@ async function clearCommand(_input: RunnerCommandInput, api: RunnerCommandApi): 
 // /<runner> resume is user-facing recovery: reactivate paused state if needed,
 // then hand control to the same controller path used by automatic continuation.
 async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi): Promise<void> {
-  const run = api.readRun();
+  const run = currentRun(api);
   if (!run) return void api.ctx.ui.notify(`No ${api.definition.label} run to resume.`, "warning");
   const inProgress = turnInProgressReason(api.ctx);
   if (inProgress)
@@ -170,6 +181,14 @@ async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi):
       `${api.definition.label} resume skipped: ${inProgress}.`,
       "warning",
     );
+  const owner = activeRunnerOwner(api.ctx, api.definition.id);
+  if (owner) {
+    api.ctx.ui.notify(
+      `${owner.definition.label} owns this session. Clear or complete it before resuming ${api.definition.label}.`,
+      "warning",
+    );
+    return;
+  }
   if (run.status === "complete")
     return void api.ctx.ui.notify(`${api.definition.label} run is already complete.`, "warning");
   if (run.status === "paused") {
@@ -185,6 +204,10 @@ async function resumeCommand(_input: RunnerCommandInput, api: RunnerCommandApi):
   }
   activateRunnerTool(api.pi, api.ctx, api.definition);
   await api.runController();
+}
+
+function currentRun(api: Pick<RunnerCommandApi, "ctx" | "definition">): RunState | null {
+  return readRun(api.ctx, api.definition.id);
 }
 
 function notifyStatus(
@@ -236,7 +259,7 @@ function commandApi(
     pi,
     ctx,
     definition,
-    readRun: () => readRun(ctx, definition.id),
+    readRun: () => toRunView(readRun(ctx, definition.id)),
     appendFeatureEvent: (type, payload, namespace = definition.id) => {
       const run = readRun(ctx, definition.id);
       if (!run) throw new Error(`No ${definition.label} run is active.`);

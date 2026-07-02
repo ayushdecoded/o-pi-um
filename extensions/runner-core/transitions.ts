@@ -20,6 +20,8 @@ import type {
   WorkTask,
 } from "./types.ts";
 
+type TaskEvidenceUpdate = Pick<WorkTask, "id" | "evidence"> & { attemptId?: string };
+
 export function createRun(
   definition: RunnerDefinition,
   intent: string,
@@ -70,10 +72,7 @@ export function startNextWork(run: RunState): CoreResult<{ run: RunState; work: 
   });
 }
 
-export function updateTask(
-  run: RunState,
-  update: Pick<WorkTask, "id" | "evidence"> | null,
-): CoreResult<RunState> {
+export function updateTask(run: RunState, update: TaskEvidenceUpdate | null): CoreResult<RunState> {
   if (run.status !== "active" || !run.plan) return fail("No active run plan to update.");
   if (!update) return fail("Provide task evidence for the assigned task.");
 
@@ -81,6 +80,34 @@ export function updateTask(
   const issue = applyTaskEvidence(plan, run, update);
   if (issue) return fail(issue);
   return ok(touch({ ...run, plan, currentTaskId: undefined, currentTaskPacketId: undefined }));
+}
+
+export function failTask(run: RunState, update: TaskEvidenceUpdate): CoreResult<RunState> {
+  if (run.status !== "active" || !run.plan) return fail("No active run plan to update.");
+  if (!run.currentTaskId) return fail("No task is currently assigned.");
+  if (update.id !== run.currentTaskId)
+    return fail(`Task ${update.id} is not the current assigned task.`);
+  const evidence = update.evidence?.trim();
+  if (!evidence) return fail("Task failure needs evidence.");
+  const plan = clone(run.plan);
+  const task = findTask(plan, update.id);
+  if (!task) return fail(`Unknown task ${update.id}.`);
+  task.reports = [
+    ...(task.reports ?? []),
+    {
+      attemptId: update.attemptId ?? randomUUID(),
+      result: "failed",
+      evidence,
+      createdAt: nowSeconds(),
+    },
+  ];
+  return ok(
+    pauseRun(
+      { ...run, plan, currentTaskId: undefined, currentTaskPacketId: undefined },
+      "task_failed",
+      evidence,
+    ),
+  );
 }
 
 export function rollUpUnit(
@@ -157,7 +184,7 @@ export function hasAssignedIncompleteTask(run: RunState): boolean {
 function applyTaskEvidence(
   plan: RunPlan,
   run: RunState,
-  update: Pick<WorkTask, "id" | "evidence">,
+  update: TaskEvidenceUpdate,
 ): string | null {
   const task = findTask(plan, update.id);
   if (!task) return `Unknown task ${update.id}.`;
@@ -171,23 +198,36 @@ function applyTaskEvidence(
     return `Task ${update.id} has incomplete dependencies.`;
 
   task.evidence = update.evidence?.trim();
-  return task.evidence ? null : `Completed task ${task.id} needs evidence.`;
+  if (!task.evidence) return `Completed task ${task.id} needs evidence.`;
+  task.reports = [
+    ...(task.reports ?? []),
+    {
+      attemptId: update.attemptId ?? randomUUID(),
+      result: "complete",
+      evidence: task.evidence,
+      createdAt: nowSeconds(),
+    },
+  ];
+  return null;
 }
 
 function resetPlanProgress(plan: WorkPlan): WorkPlan {
   return {
     contract: plan.contract,
+    ...(plan.metadata ? { metadata: clone(plan.metadata) } : {}),
     units: plan.units.map((unit) => ({
       id: unit.id,
       name: unit.name,
       objective: unit.objective,
       dependsOn: [...unit.dependsOn],
+      ...(unit.metadata ? { metadata: clone(unit.metadata) } : {}),
       tasks: unit.tasks.map((task) => ({
         id: task.id,
         name: task.name,
         objective: task.objective,
         verification: task.verification,
         dependsOn: [...task.dependsOn],
+        ...(task.metadata ? { metadata: clone(task.metadata) } : {}),
       })),
     })),
   };

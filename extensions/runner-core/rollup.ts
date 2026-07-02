@@ -5,7 +5,8 @@ import { isCurrent, type RunnerToken } from "./runtime.ts";
 import { appendCoreEvent, readRun } from "./store.ts";
 import { clearRunnerTool } from "./tool-scope.ts";
 import { finishIfComplete, pauseRun, rollUpUnit } from "./transitions.ts";
-import type { RunnerDefinition, RunState, RunWorkUnit, WorkUnit } from "./types.ts";
+import type { RunnerDefinition, RunState, RunWorkUnit } from "./types.ts";
+import { toPublicUnit, toRunView } from "./view.ts";
 
 // Roll up exactly one completed unit. navigateTree() changes the active branch, so
 // the completed pre-navigation run remains the source of truth. We re-read only to
@@ -33,7 +34,7 @@ export async function rollUpReadyUnit(
   const result = await ctx.navigateTree(startEntryId, {
     summarize: true,
     customInstructions:
-      definition.rollupPrompt?.({ run: publicRun(run), unit: publicUnit(unit) }) ??
+      definition.rollupPrompt?.({ run: toRunView(run)!, unit: toPublicUnit(unit) }) ??
       defaultRollupPrompt(unit),
     label: `✓ ${unit.id} ${unit.name}`,
   });
@@ -111,7 +112,11 @@ async function appendRolledUp(
   const event = {
     type: "unit.rolled_up",
     unitId,
-    tasks: unit?.tasks.map((task) => ({ id: task.id, evidence: task.evidence })),
+    tasks: unit?.tasks.map((task) => ({
+      id: task.id,
+      evidence: task.evidence,
+      reports: task.reports,
+    })),
     ...summary,
   } as const;
   const entryId = appendCoreEvent(pi, ctx, {
@@ -120,26 +125,6 @@ async function appendRolledUp(
     event,
   });
   await emitRunnerEvent(pi, ctx, definition, event, rolled.value, entryId);
-}
-
-function publicRun(run: RunState) {
-  const {
-    plan,
-    currentTaskPacketId: _packet,
-    currentTaskId: _task,
-    currentUnitId: _unit,
-    metadata: _metadata,
-    ...rest
-  } = run;
-  return {
-    ...rest,
-    ...(plan ? { plan: { contract: plan.contract, units: plan.units.map(publicUnit) } } : {}),
-  };
-}
-
-function publicUnit(unit: RunWorkUnit): WorkUnit {
-  const { runner: _runner, ...publicFields } = unit;
-  return publicFields;
 }
 
 function alreadyRolledUp(run: RunState | null, unitId: string): boolean {

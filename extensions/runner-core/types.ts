@@ -16,10 +16,12 @@ export type RunnerPolicy = {
   maxTasksPerUnit?: number;
 };
 
-export type RunnerPromptRun = Omit<
+export type RunnerRunView = Omit<
   RunState,
   "plan" | "metadata" | "currentTaskPacketId" | "currentTaskId" | "currentUnitId"
 > & { plan?: WorkPlan };
+
+export type RunnerPromptRun = RunnerRunView;
 
 export type SetupPromptInput = { run: RunnerPromptRun };
 export type WorkPromptInput = {
@@ -78,7 +80,7 @@ export type RunnerCommandApi<TEvents extends object = RunnerFeatureEventMap> = {
   pi: ExtensionAPI;
   ctx: ExtensionCommandContext;
   definition: RunnerDefinition<TEvents>;
-  readRun: () => RunState | null;
+  readRun: () => RunnerRunView | null;
   appendFeatureEvent: AppendFeatureEvent<TEvents>;
   readFeatureEvents: <
     TType extends RunnerFeatureEventName<TEvents> = RunnerFeatureEventName<TEvents>,
@@ -115,7 +117,7 @@ export type RunnerToolActionInput<TEvents extends object = RunnerFeatureEventMap
   ctx: ExtensionContext;
   definition: RunnerDefinition<TEvents>;
   params: Record<string, unknown>;
-  run: RunState | null;
+  run: RunnerRunView | null;
   appendFeatureEvent: AppendFeatureEvent<TEvents>;
   readFeatureEvents: <
     TType extends RunnerFeatureEventName<TEvents> = RunnerFeatureEventName<TEvents>,
@@ -146,7 +148,7 @@ export type RunnerEffect<TEvents extends object = RunnerFeatureEventMap> = (
 export type RunnerEffectApi<TEvents extends object = RunnerFeatureEventMap> = {
   runnerId: string;
   label: string;
-  readRun: () => RunState | null;
+  readRun: () => RunnerRunView | null;
   appendFeatureEvent: AppendFeatureEvent<TEvents>;
   readFeatureEvents: <
     TType extends RunnerFeatureEventName<TEvents> = RunnerFeatureEventName<TEvents>,
@@ -157,7 +159,7 @@ export type RunnerEffectApi<TEvents extends object = RunnerFeatureEventMap> = {
 };
 
 export type RunnerEffectEvent = RunnerCoreEvent & {
-  run: RunState;
+  run: RunnerRunView;
   entryId: string;
 };
 
@@ -165,7 +167,13 @@ export type RunnerCoreEvent =
   | { type: "run.created"; intent: string; metadata?: Record<string, unknown> }
   | { type: "plan.approved"; plan: WorkPlan }
   | { type: "task.assigned"; unitId: string; taskId: string; packetId: string }
-  | { type: "task.reported"; taskId: string; result: "complete" | "failed"; evidence: string }
+  | {
+      type: "task.reported";
+      taskId: string;
+      result: "complete" | "failed";
+      evidence: string;
+      attemptId: string;
+    }
   | {
       type: "unit.rolled_up";
       unitId: string;
@@ -240,6 +248,7 @@ export type RunState = {
 export type WorkPlan = {
   contract: string;
   units: WorkUnit[];
+  metadata?: Record<string, unknown>;
 };
 
 export type RunPlan = Omit<WorkPlan, "units"> & { units: RunWorkUnit[] };
@@ -250,6 +259,7 @@ export type WorkUnit = {
   objective: string;
   dependsOn: string[];
   tasks: WorkTask[];
+  metadata?: Record<string, unknown>;
 };
 
 export type RunnerUnitState = {
@@ -273,9 +283,18 @@ export type WorkTask = {
   dependsOn: string[];
   /** Evidence is the completion marker. No separate task status exists. */
   evidence?: string;
+  metadata?: Record<string, unknown>;
+  reports?: TaskReport[];
 };
 
-export type UnitRollupTask = Pick<WorkTask, "id" | "evidence">;
+export type TaskReport = {
+  attemptId: string;
+  result: "complete" | "failed";
+  evidence: string;
+  createdAt: number;
+};
+
+export type UnitRollupTask = Pick<WorkTask, "id" | "evidence" | "reports">;
 
 export type UnitSummary = {
   unitId: string;

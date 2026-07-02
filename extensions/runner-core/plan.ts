@@ -2,6 +2,7 @@ import type { WorkPlan, WorkTask, WorkUnit } from "./types.ts";
 
 export type PlanInput = {
   units?: UnitInput[];
+  metadata?: Record<string, unknown>;
 };
 
 export type UnitInput = {
@@ -10,6 +11,7 @@ export type UnitInput = {
   objective?: string;
   dependsOn?: string[];
   tasks?: TaskInput[];
+  metadata?: Record<string, unknown>;
 };
 
 export type TaskInput = {
@@ -18,11 +20,13 @@ export type TaskInput = {
   objective?: string;
   verification?: string;
   dependsOn?: string[];
+  metadata?: Record<string, unknown>;
 };
 
 export type TaskUpdateInput = {
   id?: string;
   evidence?: string;
+  attemptId?: string;
 };
 
 // Convert loose tool input into strict core state. Validation happens separately
@@ -31,6 +35,7 @@ export function normalizePlan(contract: string, input: PlanInput | undefined): W
   return {
     contract: contract.trim(),
     units: (input?.units ?? []).map(normalizeUnit),
+    ...(isRecord(input?.metadata) ? { metadata: input.metadata } : {}),
   };
 }
 
@@ -38,10 +43,11 @@ export function normalizePlan(contract: string, input: PlanInput | undefined): W
 // Evidence implies completion.
 export function normalizeTaskUpdate(
   input: TaskUpdateInput | undefined,
-): Pick<WorkTask, "id" | "evidence"> | null {
+): (Pick<WorkTask, "id" | "evidence"> & { attemptId?: string }) | null {
   const id = input?.id?.trim();
   const evidence = input?.evidence?.trim();
-  return id ? { id, ...(evidence ? { evidence } : {}) } : null;
+  const attemptId = input?.attemptId?.trim();
+  return id ? { id, ...(evidence ? { evidence } : {}), ...(attemptId ? { attemptId } : {}) } : null;
 }
 
 function normalizeUnit(input: UnitInput): WorkUnit {
@@ -51,6 +57,7 @@ function normalizeUnit(input: UnitInput): WorkUnit {
     objective: input.objective?.trim() ?? "",
     dependsOn: cleanDeps(input.dependsOn),
     tasks: (input.tasks ?? []).map(normalizeTask),
+    ...(isRecord(input.metadata) ? { metadata: input.metadata } : {}),
   };
 }
 
@@ -61,7 +68,12 @@ function normalizeTask(input: TaskInput): WorkTask {
     objective: input.objective?.trim() ?? "",
     verification: input.verification?.trim() ?? "",
     dependsOn: cleanDeps(input.dependsOn),
+    ...(isRecord(input.metadata) ? { metadata: input.metadata } : {}),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function cleanDeps(value: unknown): string[] {

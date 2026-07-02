@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { appendFeatureEvent, readFeatureEvents, readRun } from "./store.ts";
+import { toRunView } from "./view.ts";
 import type {
   RunnerCoreEvent,
   RunnerDefinition,
@@ -20,7 +21,7 @@ export async function emitRunnerEvent(
   const api = effectApi(pi, ctx, definition, run.id);
   for (const effect of effectsFor(definition)) {
     try {
-      await effect({ ...clone(event), run: clone(run), entryId }, api);
+      await effect({ ...clone(event), run: toRunView(run)!, entryId }, api);
     } catch (error) {
       const message = errorMessage(error);
       appendFeatureEvent(pi, ctx, {
@@ -44,7 +45,7 @@ function effectApi(
   return {
     runnerId: definition.id,
     label: definition.label,
-    readRun: () => cloneOrNull(readRun(ctx, definition.id)),
+    readRun: () => toRunView(readRun(ctx, definition.id)),
     appendFeatureEvent: (type, payload, namespace = definition.id) =>
       appendFeatureEvent(pi, ctx, {
         runnerId: definition.id,
@@ -69,10 +70,6 @@ function effectsFor(definition: RunnerDefinition): RunnerEffect[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function cloneOrNull<T>(value: T | null): T | null {
-  return value ? clone(value) : null;
 }
 
 function clone<T>(value: T): T {

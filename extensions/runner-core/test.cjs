@@ -6,8 +6,11 @@ const { readRun, readFeatureEvents, RUNNER_ENTRY_TYPE } = jiti("./store.ts");
 const { runStatusText } = jiti("./format.ts");
 const { registerRunnerTool } = jiti("./tool.ts");
 const { registerRunnerCommand } = jiti("./command.ts");
+const { registerRunnerScheduler } = jiti("./registry.ts");
 const { activateRunnerTool, clearRunnerTool, rememberRunnerTool } = jiti("./tool-scope.ts");
+const { activeRunnerOwner, rememberRunnerDefinition } = jiti("./ownership.ts");
 const { runRunnerController, turnInProgressReason } = jiti("./controller.ts");
+const { toRunView, toPublicUnit } = jiti("./view.ts");
 const publicApi = jiti("./index.ts");
 const { Type } = require("typebox");
 
@@ -79,13 +82,19 @@ function event(kind, data = {}) {
     return { type: "run.created", intent: data.intent ?? "intent", metadata: data.metadata };
   if (kind === "plan-approved") return { type: "plan.approved", plan: data.plan };
   if (kind === "task-assigned")
-    return { type: "task.assigned", unitId: data.unitId, taskId: data.taskId };
+    return {
+      type: "task.assigned",
+      unitId: data.unitId,
+      taskId: data.taskId,
+      ...(data.packetId ? { packetId: data.packetId } : {}),
+    };
   if (kind === "task-evidence")
     return {
       type: "task.reported",
       taskId: data.taskId,
       result: "complete",
       evidence: data.evidence,
+      ...(data.attemptId ? { attemptId: data.attemptId } : {}),
     };
   if (kind === "task-failed")
     return {
@@ -93,6 +102,7 @@ function event(kind, data = {}) {
       taskId: data.taskId,
       result: "failed",
       evidence: data.evidence,
+      ...(data.attemptId ? { attemptId: data.attemptId } : {}),
     };
   if (kind === "unit-rolled-up")
     return {
@@ -149,9 +159,15 @@ function event(kind, data = {}) {
 
   {
     const imported = plan();
+    imported.metadata = { kind: "demo" };
+    imported.units[0].metadata = { unit: true };
+    imported.units[0].tasks[0].metadata = { task: true };
     imported.units[0].tasks[0].evidence = "should be reset";
     const approved = approvePlan(createRun(definition, "intent"), definition, imported);
     assert.equal(approved.ok, true);
+    assert.equal(approved.value.plan.metadata.kind, "demo");
+    assert.equal(approved.value.plan.units[0].metadata.unit, true);
+    assert.equal(approved.value.plan.units[0].tasks[0].metadata.task, true);
     assert.equal(approved.value.plan.units[0].tasks[0].evidence, undefined);
   }
 
@@ -161,11 +177,102 @@ function event(kind, data = {}) {
     run = updateTask(run, { id: "t1", evidence: "proof" }).value;
     assert.equal(run.currentTaskId, undefined);
     assert.equal(run.plan.units[0].tasks[0].evidence, "proof");
+    assert.equal(run.plan.units[0].tasks[0].reports.length, 1);
+    assert.equal(toRunView(run).plan.units[0].tasks[0].reports, undefined);
+    assert.equal(toPublicUnit(run.plan.units[0]).tasks[0].reports, undefined);
 
     const first = rollUpUnit(run, "s1", { summaryEntryId: "summary" });
     assert.equal(first.ok, true);
     const second = rollUpUnit(first.value, "s1", { summaryEntryId: "summary-2" });
     assert.equal(second.ok, false);
+  }
+
+  {
+    rememberRunnerDefinition(definition);
+    const robopi = { ...definition, id: "robopi", label: "RoboPi", tool: { name: "robopi" } };
+    rememberRunnerDefinition(robopi);
+    const run = createRun(definition, "intent");
+    const ctx = {
+      sessionManager: {
+        getBranch: () => [entry("created", "created", run.id, { intent: run.intent })],
+      },
+    };
+    assert.equal(activeRunnerOwner(ctx, "robopi")?.definition.id, "goal");
+  }
+
+  {
+    const robopi = {
+      ...definition,
+      id: "robopi",
+      label: "RoboPi",
+      command: { name: "robopi" },
+      tool: { name: "robopi" },
+    };
+    rememberRunnerDefinition(definition);
+    rememberRunnerDefinition(robopi);
+    const goalRun = createRun(definition, "goal intent");
+    const roboRun = createRun(robopi, "robo intent");
+    const entries = [
+      entry("goal-created", "created", goalRun.id, { intent: goalRun.intent }),
+      {
+        id: "robo-created",
+        type: "custom",
+        customType: RUNNER_ENTRY_TYPE,
+        data: {
+          version: 1,
+          scope: "core",
+          runnerId: "robopi",
+          runId: roboRun.id,
+          timestamp: 1,
+          event: { type: "run.created", intent: roboRun.intent },
+        },
+      },
+    ];
+    const sent = [];
+    const notices = [];
+    await runRunnerController({ sendMessage: (message) => sent.push(message) }, robopi, {
+      ui: { notify: (message) => notices.push(message) },
+      sessionManager: {
+        getBranch: () => entries,
+        getLeafEntry: () => entries.at(-1),
+        getSessionFile: () => "session.jsonl",
+        getSessionId: () => "session",
+      },
+    });
+    assert.equal(sent.length, 0);
+    assert.match(notices.join("\n"), /Goal owns this session/);
+  }
+
+  {
+    const schedulerDefinition = {
+      ...definition,
+      id: "scheduler-only",
+      label: "SchedulerOnly",
+      command: { name: "scheduler-only" },
+      tool: { name: "scheduler-only" },
+    };
+    registerRunnerScheduler({ on() {} }, schedulerDefinition);
+    const run = createRun(schedulerDefinition, "intent");
+    const ctx = {
+      sessionManager: {
+        getBranch: () => [
+          {
+            id: "created",
+            type: "custom",
+            customType: RUNNER_ENTRY_TYPE,
+            data: {
+              version: 1,
+              scope: "core",
+              runnerId: schedulerDefinition.id,
+              runId: run.id,
+              timestamp: 1,
+              event: { type: "run.created", intent: run.intent },
+            },
+          },
+        ],
+      },
+    };
+    assert.equal(activeRunnerOwner(ctx, "goal")?.definition.id, "scheduler-only");
   }
 
   {
@@ -230,6 +337,67 @@ function event(kind, data = {}) {
       },
     };
     assert.match(runStatusText(readRun(rolledUpBranch, "goal"), "Goal"), /Tasks: 1\/1 complete/);
+
+    const reportedRollupBranch = {
+      sessionManager: {
+        getBranch: () => [
+          entry("created", "created", created.id, { intent: created.intent }),
+          entry("plan", "plan-approved", created.id, { plan: approved.plan }),
+          entry("assign", "task-assigned", created.id, {
+            unitId: "s1",
+            taskId: "t1",
+            packetId: "packet-1",
+          }),
+          entry("evidence", "task-evidence", created.id, {
+            taskId: "t1",
+            evidence: "proof",
+            attemptId: "packet-1",
+          }),
+          entry("rollup", "unit-rolled-up", created.id, {
+            unitId: "s1",
+            summaryEntryId: "summary",
+            tasks: [{ id: "t1", evidence: "proof" }],
+          }),
+        ],
+      },
+    };
+    assert.equal(
+      readRun(reportedRollupBranch, "goal")?.plan.units[0].tasks[0].reports[0].attemptId,
+      "packet-1",
+    );
+
+    const legacyRollupBranch = {
+      sessionManager: {
+        getBranch: () => [
+          entry("created", "created", created.id, { intent: created.intent }),
+          entry("plan", "plan-approved", created.id, { plan: approved.plan }),
+          entry("assign", "task-assigned", created.id, { unitId: "s1", taskId: "t1" }),
+          entry("rollup", "unit-rolled-up", created.id, {
+            unitId: "s1",
+            summaryEntryId: "summary",
+          }),
+        ],
+        getSessionFile: () => "session.jsonl",
+        getSessionId: () => "session",
+      },
+      ui: {
+        notify(message) {
+          notices.push(message);
+        },
+      },
+    };
+    let command;
+    const notices = [];
+    registerRunnerCommand(
+      {
+        registerCommand(_name, config) {
+          command = config;
+        },
+      },
+      definition,
+    );
+    await command.handler("status", legacyRollupBranch);
+    assert.match(notices.join("\n"), /Tasks: 1\/1 complete/);
   }
 
   {
@@ -292,6 +460,8 @@ function event(kind, data = {}) {
       ctx,
     );
     assert.equal(readRun(ctx, "goal")?.plan.units[0].tasks[0].evidence, "proof");
+    assert.equal(readRun(ctx, "goal")?.plan.units[0].tasks[0].reports.length, 1);
+    assert.equal(readRun(ctx, "goal")?.plan.units[0].tasks[0].reports[0].attemptId, "legacy:t1");
   }
 
   {
@@ -503,6 +673,69 @@ function event(kind, data = {}) {
       },
     };
     assert.match(turnInProgressReason(queuedCtx), /already queued/);
+  }
+
+  {
+    const entries = [];
+    const pi = {
+      appendEntry(customType, data) {
+        entries.push({ id: `e${entries.length}`, type: "custom", customType, data });
+        return entries.at(-1).id;
+      },
+      sendMessage(message) {
+        entries.push({
+          id: `m${entries.length}`,
+          type: "custom_message",
+          customType: message.customType,
+          details: message.details,
+          content: message.content,
+        });
+      },
+    };
+    const ctx = {
+      hasUI: false,
+      ui: { notify() {} },
+      sessionManager: {
+        getBranch: () => entries,
+        getLeafId: () => entries.at(-1)?.id,
+        getSessionFile: () => "session.jsonl",
+        getSessionId: () => "session",
+        getLeafEntry: () => entries.at(-1),
+      },
+    };
+    let promptTask;
+    const promptDefinition = {
+      ...definition,
+      workPrompt(input) {
+        promptTask = input.task;
+        return "";
+      },
+    };
+    const run = createRun(promptDefinition, "intent");
+    const approved = approvePlan(run, promptDefinition, plan()).value;
+    pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("created", run.id, { intent: run.intent }));
+    pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("plan-approved", run.id, { plan: approved.plan }));
+    pi.appendEntry(
+      RUNNER_ENTRY_TYPE,
+      eventData("task-assigned", run.id, {
+        unitId: "s1",
+        taskId: "t1",
+        packetId: "attempt-1",
+      }),
+    );
+    pi.appendEntry(
+      RUNNER_ENTRY_TYPE,
+      eventData("task-failed", run.id, {
+        taskId: "t1",
+        evidence: "blocked",
+        attemptId: "attempt-1",
+      }),
+    );
+    pi.appendEntry(RUNNER_ENTRY_TYPE, eventData("resumed", run.id));
+
+    await runRunnerController(pi, promptDefinition, ctx);
+    assert.equal(readRun(ctx, "goal")?.plan.units[0].tasks[0].reports[0].attemptId, "attempt-1");
+    assert.equal(promptTask.reports, undefined);
   }
 
   console.log("runner-core tests passed");
