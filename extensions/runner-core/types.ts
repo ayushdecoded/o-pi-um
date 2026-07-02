@@ -18,7 +18,7 @@ export type RunnerPolicy = {
 
 export type RunnerPromptRun = Omit<
   RunState,
-  "plan" | "metadata" | "currentTaskPacketEntryId" | "currentTaskId" | "currentUnitId"
+  "plan" | "metadata" | "currentTaskPacketId" | "currentTaskId" | "currentUnitId"
 > & { plan?: WorkPlan };
 
 export type SetupPromptInput = { run: RunnerPromptRun };
@@ -44,7 +44,6 @@ export type RunnerDefinition<TEvents extends object = RunnerFeatureEventMap> = {
   rollupPrompt?: (input: RollupPromptInput) => string;
   rollup?: false;
   policy?: RunnerPolicy;
-  workflow?: RunnerWorkflow;
   /** React to durable core events. Effects are for side effects/facts, not scheduling policy. */
   effects?: RunnerEffect<TEvents> | RunnerEffect<TEvents>[];
 };
@@ -81,7 +80,11 @@ export type RunnerCommandApi<TEvents extends object = RunnerFeatureEventMap> = {
   definition: RunnerDefinition<TEvents>;
   readRun: () => RunState | null;
   appendFeatureEvent: AppendFeatureEvent<TEvents>;
-  readFeatureEvents: (options?: ReadFeatureEventsOptions) => RunnerFeatureEventRecord[];
+  readFeatureEvents: <
+    TType extends RunnerFeatureEventName<TEvents> = RunnerFeatureEventName<TEvents>,
+  >(
+    options?: ReadFeatureEventsOptions & { type?: TType },
+  ) => RunnerFeatureEventRecord<TEvents, TType>[];
   runController: () => Promise<void>;
 };
 
@@ -114,18 +117,16 @@ export type RunnerToolActionInput<TEvents extends object = RunnerFeatureEventMap
   params: Record<string, unknown>;
   run: RunState | null;
   appendFeatureEvent: AppendFeatureEvent<TEvents>;
-  readFeatureEvents: (options?: ReadFeatureEventsOptions) => RunnerFeatureEventRecord[];
+  readFeatureEvents: <
+    TType extends RunnerFeatureEventName<TEvents> = RunnerFeatureEventName<TEvents>,
+  >(
+    options?: ReadFeatureEventsOptions & { type?: TType },
+  ) => RunnerFeatureEventRecord<TEvents, TType>[];
 };
 
 export type RunnerToolResult = {
   content: Array<{ type: "text"; text: string }>;
   details: Record<string, unknown>;
-};
-
-export type RunnerWorkflow = {
-  unitReadyToRollUp?: (run: RunState) => RunWorkUnit | null;
-  isPlanComplete?: (run: RunState) => boolean;
-  startNextWork?: (run: RunState) => CoreResult<{ run: RunState; work: ReadyWork }>;
 };
 
 export type AppendFeatureEvent<TEvents extends object = RunnerFeatureEventMap> = <
@@ -147,7 +148,11 @@ export type RunnerEffectApi<TEvents extends object = RunnerFeatureEventMap> = {
   label: string;
   readRun: () => RunState | null;
   appendFeatureEvent: AppendFeatureEvent<TEvents>;
-  readFeatureEvents: (options?: ReadFeatureEventsOptions) => RunnerFeatureEventRecord[];
+  readFeatureEvents: <
+    TType extends RunnerFeatureEventName<TEvents> = RunnerFeatureEventName<TEvents>,
+  >(
+    options?: ReadFeatureEventsOptions & { type?: TType },
+  ) => RunnerFeatureEventRecord<TEvents, TType>[];
   notify: ExtensionContext["ui"]["notify"];
 };
 
@@ -159,7 +164,7 @@ export type RunnerEffectEvent = RunnerCoreEvent & {
 export type RunnerCoreEvent =
   | { type: "run.created"; intent: string; metadata?: Record<string, unknown> }
   | { type: "plan.approved"; plan: WorkPlan }
-  | { type: "task.assigned"; unitId: string; taskId: string }
+  | { type: "task.assigned"; unitId: string; taskId: string; packetId: string }
   | { type: "task.reported"; taskId: string; result: "complete" | "failed"; evidence: string }
   | {
       type: "unit.rolled_up";
@@ -173,13 +178,16 @@ export type RunnerCoreEvent =
   | { type: "run.completed" }
   | { type: "run.cleared" };
 
-export type RunnerFeatureEventRecord = {
+export type RunnerFeatureEventRecord<
+  TEvents extends object = RunnerFeatureEventMap,
+  TType extends RunnerFeatureEventName<TEvents> = RunnerFeatureEventName<TEvents>,
+> = {
   id: string;
   runnerId: string;
   runId: string;
   namespace: string;
-  type: string;
-  payload?: unknown;
+  type: TType;
+  payload?: TEvents[TType];
   timestamp: number;
 };
 
@@ -219,7 +227,7 @@ export type RunState = {
   plan?: RunPlan;
   currentUnitId?: string;
   currentTaskId?: string;
-  currentTaskPacketEntryId?: string;
+  currentTaskPacketId?: string;
   blockedReason?: string;
   blockedDetail?: string;
   summaries: UnitSummary[];

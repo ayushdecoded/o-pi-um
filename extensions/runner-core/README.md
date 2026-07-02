@@ -73,7 +73,6 @@ Customization stays narrow and composable:
 - `registerRunner(pi, definition, { command:false })` lets a feature own slash commands while reusing tool/controller state.
 - `command.actions` adds slash-command actions; replacing a built-in requires `overrideDefault:true`.
 - `tool.actions` adds model-facing actions; replacing a built-in requires `overrideDefault:true`.
-- `workflow` swaps scheduler policy decisions.
 - `effects` react to durable core events and can persist namespaced feature events.
 
 RoboPi can remain a thin definition until it has real external behavior. Worktree/GitHub behavior should stay outside core.

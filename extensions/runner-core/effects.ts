@@ -22,7 +22,15 @@ export async function emitRunnerEvent(
     try {
       await effect({ ...clone(event), run: clone(run), entryId }, api);
     } catch (error) {
-      api.notify(`${definition.label} effect failed: ${errorMessage(error)}`, "warning");
+      const message = errorMessage(error);
+      appendFeatureEvent(pi, ctx, {
+        runnerId: definition.id,
+        runId: run.id,
+        namespace: "runner-core",
+        event: "effect_failed",
+        payload: { coreEvent: event.type, entryId, message },
+      });
+      api.notify(`${definition.label} effect failed: ${message}`, "warning");
     }
   }
 }
@@ -46,7 +54,7 @@ function effectApi(
         payload,
       }),
     readFeatureEvents: (options = {}) =>
-      readFeatureEvents(ctx, definition.id, { runId, ...options }),
+      readFeatureEvents(ctx, definition.id, { runId, ...options }) as never,
     notify: ctx.ui?.notify?.bind(ctx.ui) ?? (() => undefined),
   };
 }

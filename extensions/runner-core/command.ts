@@ -253,7 +253,7 @@ function commandApi(
       return readFeatureEvents(ctx, definition.id, {
         ...(run ? { runId: run.id } : {}),
         ...options,
-      });
+      }) as never;
     },
     runController: () => runRunnerController(pi, definition, ctx),
   };
